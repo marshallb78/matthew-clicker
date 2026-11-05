@@ -6,7 +6,9 @@ export interface Skin {
   rarity: SkinRarity;
   description: string;
   perkDescription: string;
-  image: string;
+  image: string; // for backward compatibility, points to normalImage
+  normalImage: string;
+  tongueImage: string;
   cost: number;
   rebirthRequired?: number;
   clickBonusMultiplier: number;

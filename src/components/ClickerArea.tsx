@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { GameState, FloatingNumber } from '../types/game';
 import { SKINS } from '../data/skins';
 import { formatCoins } from '../utils/formatters';
@@ -21,12 +21,41 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   onOpenSettings,
 }) => {
   const [isSquashing, setIsSquashing] = useState(false);
+  const [isTongueOut, setIsTongueOut] = useState(false);
   const [floatingNumbers, setFloatingNumbers] = useState<FloatingNumber[]>([]);
   const characterRef = useRef<HTMLDivElement | null>(null);
+  const tongueTimeoutRef = useRef<number | null>(null);
+  const squashTimeoutRef = useRef<number | null>(null);
 
   const equippedSkin = SKINS.find((s) => s.id === state.equippedSkin) || SKINS[0];
   const { totalPower, critChance, critMultiplier } = calculateClickPower(state);
   const cps = calculateCPS(state);
+
+  // Preload current skin images immediately for zero-flicker transitions
+  useEffect(() => {
+    const imgNormal = new Image();
+    imgNormal.src = equippedSkin.normalImage;
+    const imgTongue = new Image();
+    imgTongue.src = equippedSkin.tongueImage;
+  }, [equippedSkin]);
+
+  // Preload all skin assets in the background on initial load
+  useEffect(() => {
+    SKINS.forEach((skin) => {
+      const n = new Image();
+      n.src = skin.normalImage;
+      const t = new Image();
+      t.src = skin.tongueImage;
+    });
+  }, []);
+
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (tongueTimeoutRef.current) window.clearTimeout(tongueTimeoutRef.current);
+      if (squashTimeoutRef.current) window.clearTimeout(squashTimeoutRef.current);
+    };
+  }, []);
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -61,7 +90,13 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
 
     // Squash animation
     setIsSquashing(true);
-    setTimeout(() => setIsSquashing(false), 140);
+    if (squashTimeoutRef.current) window.clearTimeout(squashTimeoutRef.current);
+    squashTimeoutRef.current = window.setTimeout(() => setIsSquashing(false), 140);
+
+    // Tongue-out click expression (reverts after 220ms, resets immediately on rapid clicks)
+    setIsTongueOut(true);
+    if (tongueTimeoutRef.current) window.clearTimeout(tongueTimeoutRef.current);
+    tongueTimeoutRef.current = window.setTimeout(() => setIsTongueOut(false), 220);
 
     // Floating text
     const floatId = Date.now() + Math.random();
@@ -156,12 +191,22 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
           }`}
           style={{ WebkitTapHighlightColor: 'transparent' }}
         >
-          <div className="w-60 h-60 sm:w-80 sm:h-80 md:w-96 md:h-96 max-w-[85vw] max-h-[50vh] flex items-center justify-center">
+          <div className="relative w-60 h-60 sm:w-80 sm:h-80 md:w-96 md:h-96 max-w-[85vw] max-h-[50vh] flex items-center justify-center">
             <img
-              src={equippedSkin.image}
-              alt={equippedSkin.name}
+              src={equippedSkin.normalImage}
+              alt={`${equippedSkin.name} normal`}
               draggable={false}
-              className="w-full h-full object-contain pointer-events-none drop-shadow-[0_20px_25px_rgba(0,0,0,0.6)]"
+              className={`w-full h-full object-contain pointer-events-none drop-shadow-[0_20px_25px_rgba(0,0,0,0.6)] ${
+                isTongueOut ? 'hidden' : 'block'
+              }`}
+            />
+            <img
+              src={equippedSkin.tongueImage}
+              alt={`${equippedSkin.name} tongue`}
+              draggable={false}
+              className={`w-full h-full object-contain pointer-events-none drop-shadow-[0_20px_25px_rgba(0,0,0,0.6)] ${
+                isTongueOut ? 'block' : 'hidden'
+              }`}
             />
           </div>
         </div>

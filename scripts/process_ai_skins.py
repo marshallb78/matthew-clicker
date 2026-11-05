@@ -51,3 +51,4 @@ if __name__ == "__main__":
         process_single_ai_skin(sys.argv[1], sys.argv[2])
     else:
         print("Usage: py scripts/process_ai_skins.py <input_jpg> <output_png>")
+

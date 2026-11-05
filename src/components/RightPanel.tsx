@@ -387,7 +387,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState }) => {
                       <div className="flex items-center gap-2.5 flex-1 pr-2">
                         <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-750 flex items-center justify-center p-1 overflow-hidden relative">
                           <img
-                            src={skin.image}
+                            src={skin.normalImage}
                             alt={skin.name}
                             className={`w-full h-full object-contain ${!isUnlocked ? 'filter grayscale brightness-50' : ''}`}
                           />
@@ -569,3 +569,4 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState }) => {
     </div>
   );
 };
+

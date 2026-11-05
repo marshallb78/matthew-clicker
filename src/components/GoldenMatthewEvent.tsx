@@ -115,7 +115,7 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({ state, s
         {/* Glowing Aura Ring */}
         <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-yellow-500 via-amber-300 to-yellow-100 blur-md opacity-80 animate-spin" style={{ animationDuration: '4s' }} />
         <img
-          src="./images/skins/golden_matthew.png"
+          src="./images/skins/golden-normal.png"
           alt="Golden Matthew"
           className="relative w-16 h-16 object-contain drop-shadow-[0_0_12px_rgba(255,215,0,0.9)]"
         />
