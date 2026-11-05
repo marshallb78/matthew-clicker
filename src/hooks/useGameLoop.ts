@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { GameState } from '../types/game';
 import { calculateCPS } from '../utils/calculations';
-import { SKINS } from '../data/skins';
 import { ACHIEVEMENTS } from '../data/achievements';
 import { saveGame } from '../utils/storage';
 import { soundManager } from '../audio/soundManager';
@@ -10,7 +9,7 @@ import { particleEngine } from '../components/ParticleCanvas';
 interface UseGameLoopProps {
   state: GameState;
   setState: React.Dispatch<React.SetStateAction<GameState>>;
-  onNotify: (title: string, subtitle: string, type?: 'skin' | 'ach' | 'info') => void;
+  onNotify: (title: string, subtitle: string) => void;
 }
 
 export function useGameLoop({ state, setState, onNotify }: UseGameLoopProps) {
@@ -23,22 +22,20 @@ export function useGameLoop({ state, setState, onNotify }: UseGameLoopProps) {
 
     const interval = setInterval(() => {
       const now = performance.now();
-      const dt = (now - lastTime) / 1000; // in seconds
+      const dt = (now - lastTime) / 1000;
       lastTime = now;
 
       setState((prev) => {
         const cps = calculateCPS(prev);
         const coinsToAdd = cps * dt;
 
-        // Combo timer & decay
         let newCombo = prev.combo;
         let newComboTimer = prev.comboTimer - dt;
         if (newComboTimer <= 0 && newCombo > 0) {
           newCombo = Math.max(0, newCombo - 1);
-          newComboTimer = 0.25; // decay 1 step every 250ms
+          newComboTimer = 0.25;
         }
 
-        // Frenzy timer
         let newFrenzyTimer = Math.max(0, prev.frenzyTimer - dt);
         let newFrenzyMult = newFrenzyTimer > 0 ? prev.frenzyMultiplier : 1;
 
@@ -58,35 +55,17 @@ export function useGameLoop({ state, setState, onNotify }: UseGameLoopProps) {
     return () => clearInterval(interval);
   }, [setState]);
 
-  // UNLOCK CHECKER (Every 800ms)
+  // ACHIEVEMENT CHECKER (Every 1000ms)
   useEffect(() => {
     const checker = setInterval(() => {
       const current = stateRef.current;
 
-      // 1. Check Unlocked Skins
-      for (const skin of SKINS) {
-        if (!current.unlockedSkins.includes(skin.id)) {
-          if (skin.unlockCondition(current)) {
-            soundManager.playSkinUnlock();
-            particleEngine.emitPrestige();
-            onNotify(`NEW SKIN UNLOCKED!`, `${skin.name} (${skin.rarity})`, 'skin');
-
-            setState((prev) => ({
-              ...prev,
-              unlockedSkins: [...prev.unlockedSkins, skin.id],
-            }));
-            break; // One unlock per tick to avoid spam
-          }
-        }
-      }
-
-      // 2. Check Achievements
       for (const ach of ACHIEVEMENTS) {
         if (!current.unlockedAchievements.includes(ach.id)) {
           if (ach.condition(current)) {
             soundManager.playBuy();
             particleEngine.emitPrestige();
-            onNotify(`ACHIEVEMENT UNLOCKED!`, `${ach.name}: ${ach.rewardText}`, 'ach');
+            onNotify(`ACHIEVEMENT UNLOCKED!`, `${ach.name}: ${ach.rewardText}`);
 
             setState((prev) => ({
               ...prev,
@@ -100,12 +79,12 @@ export function useGameLoop({ state, setState, onNotify }: UseGameLoopProps) {
           }
         }
       }
-    }, 800);
+    }, 1000);
 
     return () => clearInterval(checker);
   }, [setState, onNotify]);
 
-  // AUTOSAVE (Every 5 seconds and on beforeunload)
+  // AUTOSAVE (Every 5 seconds & on beforeunload)
   useEffect(() => {
     const saveInterval = setInterval(() => {
       saveGame(stateRef.current);

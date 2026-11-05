@@ -364,3 +364,4 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ state, setState })
     </div>
   );
 };
+

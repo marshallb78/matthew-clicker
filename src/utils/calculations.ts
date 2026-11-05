@@ -165,3 +165,4 @@ export function calculateOfflineEarnings(
   const coinsEarned = Math.floor(cps * effectiveSeconds * efficiency);
   return { elapsedSeconds: effectiveSeconds, coinsEarned };
 }
+

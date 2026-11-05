@@ -59,3 +59,4 @@ export const OfflineProgressModal: React.FC<OfflineProgressModalProps> = ({
     </div>
   );
 };
+

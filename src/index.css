@@ -2,72 +2,101 @@
 
 @layer base {
   :root {
-    --bg-dark: #0a0b14;
-    --bg-panel: rgba(14, 16, 31, 0.85);
+    --bg-main: #0c0f1d;
+    --bg-side: #13172b;
+    --accent-yellow: #ffb703;
     --accent-cyan: #00f0ff;
     --accent-purple: #9d4edd;
-    --accent-pink: #ff007f;
-    --accent-gold: #ffb703;
+    --font-chunky: 'Fredoka', 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
   }
 
   body {
-    background-color: var(--bg-dark);
+    background-color: var(--bg-main);
     color: #f8fafc;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--font-chunky);
     user-select: none;
     -webkit-user-select: none;
     touch-action: manipulation;
-    overflow-x: hidden;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
   }
 
-  .font-display {
-    font-family: 'Outfit', 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+  .font-chunky {
+    font-family: var(--font-chunky);
   }
+}
+
+/* Subtle Film Noise Texture Overlay */
+.noise-overlay {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.035'/%3E%3C/svg%3E");
+}
+
+/* Capybara Clicker Style Bouncy 3D Buttons */
+.btn-chunky {
+  transition: all 0.08s ease;
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.35);
+}
+
+.btn-chunky:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.btn-chunky:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+}
+
+/* Float Up Coin Text Animation */
+@keyframes floatUpFade {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+  30% {
+    transform: translate(-50%, -75%) scale(1.15);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -140%) scale(0.95);
+  }
+}
+
+.animate-float-coin {
+  animation: floatUpFade 0.85s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
+}
+
+/* Character Squash & Stretch Animation */
+@keyframes characterBounce {
+  0% {
+    transform: scale(1, 1);
+  }
+  35% {
+    transform: scale(1.14, 0.88);
+  }
+  70% {
+    transform: scale(0.92, 1.08);
+  }
+  100% {
+    transform: scale(1, 1);
+  }
+}
+
+.animate-squash {
+  animation: characterBounce 0.25s ease-out;
 }
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
-  height: 6px;
 }
-
 ::-webkit-scrollbar-track {
-  background: rgba(10, 11, 20, 0.8);
+  background: rgba(15, 18, 35, 0.6);
 }
-
 ::-webkit-scrollbar-thumb {
-  background: rgba(45, 55, 72, 0.8);
-  border-radius: 9999px;
+  background: rgba(45, 55, 85, 0.8);
+  border-radius: 999px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 240, 255, 0.5);
-}
-
-/* Float Up Damage Text Animation */
-@keyframes floatUp {
-  0% {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(0.85);
-  }
-  20% {
-    transform: translate(-50%, -65%) scale(1.15);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(-50%, -120%) scale(1);
-  }
-}
-
-.animate-float-up {
-  animation: floatUp 0.85s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
-}
-
-/* Subtle Starfield & Ambient Glow Background */
-.bg-game-pattern {
-  background-color: #080911;
-  background-image: 
-    radial-gradient(circle at 50% 30%, rgba(0, 240, 255, 0.08) 0%, transparent 60%),
-    radial-gradient(circle at 80% 70%, rgba(157, 78, 221, 0.08) 0%, transparent 50%),
-    radial-gradient(circle at 20% 80%, rgba(255, 0, 127, 0.06) 0%, transparent 40%);
 }

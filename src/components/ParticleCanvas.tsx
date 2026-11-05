@@ -205,3 +205,4 @@ export const ParticleCanvas: React.FC<{ reducedMotion?: boolean; showParticles?:
     />
   );
 };
+

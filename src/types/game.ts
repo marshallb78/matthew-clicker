@@ -7,11 +7,11 @@ export interface Skin {
   description: string;
   perkDescription: string;
   image: string;
-  unlockRequirementText: string;
-  unlockCondition: (stats: GameState) => boolean;
-  clickBonusMultiplier: number; // e.g. 1.1 = +10% click power
-  cpsBonusMultiplier: number;   // e.g. 1.05 = +5% passive CPS
-  critBonusChance: number;      // e.g. 0.02 = +2% crit chance
+  cost: number;
+  rebirthRequired?: number;
+  clickBonusMultiplier: number;
+  cpsBonusMultiplier: number;
+  critBonusChance: number;
 }
 
 export interface Upgrade {
@@ -98,3 +98,4 @@ export interface GameState {
   goldenMatthewsClicked: number;
   settings: GameSettings;
 }
+

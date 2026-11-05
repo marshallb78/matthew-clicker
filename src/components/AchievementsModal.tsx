@@ -142,3 +142,4 @@ export const AchievementsModal: React.FC<AchievementsModalProps> = ({ state }) =
     </div>
   );
 };
+
