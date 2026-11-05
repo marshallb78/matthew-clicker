@@ -15,6 +15,7 @@ import { SKINS } from '../src/data/skins';
 import { ACHIEVEMENTS } from '../src/data/achievements';
 import { ENVIRONMENTS } from '../src/data/environments';
 import { BALANCE } from '../src/data/balance';
+import { MATTHEW_LANDMARKS, rotateLandmark } from '../src/data/landmarks';
 
 describe('Matthew Clicker Core Gameplay Tests', () => {
   let state = getDefaultGameState();
@@ -223,6 +224,20 @@ describe('Matthew Clicker Core Gameplay Tests', () => {
     it('has 7 unlockable background environments', () => {
       expect(ENVIRONMENTS.length).toBe(7);
       expect(ENVIRONMENTS[0].id).toBe('matthew_room');
+    });
+
+    it('has calibrated facial landmarks matching Matthew ground truth', () => {
+      expect(MATTHEW_LANDMARKS.leftEyePupil.x).toBe(393);
+      expect(MATTHEW_LANDMARKS.leftEyePupil.y).toBe(532);
+      expect(MATTHEW_LANDMARKS.rightEyePupil.x).toBe(616);
+      expect(MATTHEW_LANDMARKS.rightEyePupil.y).toBe(494);
+      expect(MATTHEW_LANDMARKS.headTiltAngleDeg).toBeCloseTo(-9.68, 1);
+      expect(MATTHEW_LANDMARKS.interOcularDistance).toBeCloseTo(226.2, 1);
+
+      // Verify rotation utility works
+      const rotated = rotateLandmark({ x: 504.5, y: 513 }, { x: 504.5, y: 513 }, 0);
+      expect(rotated.x).toBe(504.5);
+      expect(rotated.y).toBe(513);
     });
   });
 });

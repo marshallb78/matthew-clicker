@@ -9,6 +9,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { ParticleCanvas } from './components/ParticleCanvas';
 import { GoldenMatthewEvent } from './components/GoldenMatthewEvent';
 import { OfflineProgressModal } from './components/OfflineProgressModal';
+import { SkinQualityModal } from './components/SkinQualityModal';
 import { BALANCE } from './data/balance';
 import { X, Sparkles, ChevronUp, ChevronDown } from 'lucide-react';
 
@@ -21,6 +22,7 @@ interface Toast {
 export function App() {
   const [state, setState] = useState<GameState>(() => loadGame());
   const [showSettings, setShowSettings] = useState(false);
+  const [showSkinQualityModal, setShowSkinQualityModal] = useState(false);
   const [offlineData, setOfflineData] = useState<{ elapsed: number; coins: number } | null>(null);
   const [notifications, setNotifications] = useState<Toast[]>([]);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
@@ -138,7 +140,11 @@ export function App() {
 
         {/* SIDEBAR PANEL */}
         <div className="h-[calc(100%-52px)] lg:h-full w-full">
-          <RightPanel state={state} setState={setState} />
+          <RightPanel
+            state={state}
+            setState={setState}
+            onOpenSkinQualityModal={() => setShowSkinQualityModal(true)}
+          />
         </div>
       </div>
 
@@ -152,10 +158,25 @@ export function App() {
             >
               <X className="w-5 h-5" />
             </button>
-            <SettingsModal state={state} setState={setState} />
+            <SettingsModal
+              state={state}
+              setState={setState}
+              onOpenSkinQualityModal={() => {
+                setShowSettings(false);
+                setShowSkinQualityModal(true);
+              }}
+            />
           </div>
         </div>
       )}
+
+      {/* SKIN QUALITY CONTROL & ALIGNMENT INSPECTOR MODAL */}
+      <SkinQualityModal
+        isOpen={showSkinQualityModal}
+        onClose={() => setShowSkinQualityModal(false)}
+        equippedSkinId={state.equippedSkin}
+        onEquipSkin={(skinId) => setState((prev) => ({ ...prev, equippedSkin: skinId }))}
+      />
 
       {/* OFFLINE EARNINGS POPUP */}
       {offlineData && (

@@ -198,3 +198,4 @@ export const EnvironmentBackground: React.FC<EnvironmentBackgroundProps> = ({ st
     </div>
   );
 };
+

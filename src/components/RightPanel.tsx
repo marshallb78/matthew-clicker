@@ -40,6 +40,7 @@ export type RightTab = 'upgrades' | 'rebirth' | 'achievements';
 interface RightPanelProps {
   state: GameState;
   setState: React.Dispatch<React.SetStateAction<GameState>>;
+  onOpenSkinQualityModal?: () => void;
 }
 
 const UPGRADE_ICONS: Record<string, React.ElementType> = {
@@ -64,7 +65,7 @@ const UPGRADE_ICONS: Record<string, React.ElementType> = {
 
 type BuyMode = 1 | 10 | 'MAX';
 
-export const RightPanel: React.FC<RightPanelProps> = ({ state, setState }) => {
+export const RightPanel: React.FC<RightPanelProps> = ({ state, setState, onOpenSkinQualityModal }) => {
   const [activeTab, setActiveTab] = useState<RightTab>('upgrades');
   const [upgradeSubTab, setUpgradeSubTab] = useState<'items' | 'skins'>('items');
   const [buyMode, setBuyMode] = useState<BuyMode>(1);
@@ -271,6 +272,18 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState }) => {
                     </button>
                   ))}
                 </div>
+              )}
+
+              {/* Skins Quality Inspector Button */}
+              {upgradeSubTab === 'skins' && onOpenSkinQualityModal && (
+                <button
+                  onClick={onOpenSkinQualityModal}
+                  className="px-2.5 py-1 text-[11px] font-black rounded-xl bg-slate-900 border border-slate-750 text-amber-300 hover:text-white hover:border-amber-400 transition flex items-center gap-1 shadow-sm"
+                  title="Inspect all 16 skins side-by-side with calibrated landmarks"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Inspect All 16</span>
+                </button>
               )}
             </div>
 
