@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-dark: #0a0b14;
+    --bg-panel: rgba(14, 16, 31, 0.85);
+    --accent-cyan: #00f0ff;
+    --accent-purple: #9d4edd;
+    --accent-pink: #ff007f;
+    --accent-gold: #ffb703;
+  }
+
+  body {
+    background-color: var(--bg-dark);
+    color: #f8fafc;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+    overflow-x: hidden;
+  }
+
+  .font-display {
+    font-family: 'Outfit', 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(10, 11, 20, 0.8);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(45, 55, 72, 0.8);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 240, 255, 0.5);
+}
+
+/* Float Up Damage Text Animation */
+@keyframes floatUp {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(0.85);
+  }
+  20% {
+    transform: translate(-50%, -65%) scale(1.15);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -120%) scale(1);
+  }
+}
+
+.animate-float-up {
+  animation: floatUp 0.85s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+/* Subtle Starfield & Ambient Glow Background */
+.bg-game-pattern {
+  background-color: #080911;
+  background-image: 
+    radial-gradient(circle at 50% 30%, rgba(0, 240, 255, 0.08) 0%, transparent 60%),
+    radial-gradient(circle at 80% 70%, rgba(157, 78, 221, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 20% 80%, rgba(255, 0, 127, 0.06) 0%, transparent 40%);
+}
