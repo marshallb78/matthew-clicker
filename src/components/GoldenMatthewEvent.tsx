@@ -4,6 +4,7 @@ import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
 import { calculateCPS, calculateClickPower } from '../utils/calculations';
 import { formatCoins } from '../utils/formatters';
+import { BALANCE } from '../data/balance';
 
 interface GoldenMatthewEventProps {
   state: GameState;
@@ -19,8 +20,11 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({ state, s
   // Interval timer for spawning event
   useEffect(() => {
     const resonanceLvl = state.prestigeUpgrades['golden_resonance'] || 0;
-    // Base 90s, down to 45s with prestige
-    const spawnDelay = Math.max(35000, (90000 - resonanceLvl * 10000) + (Math.random() - 0.5) * 20000);
+    const spawnDelay = Math.max(
+      45000,
+      (BALANCE.goldenEvent.baseDelayMs - resonanceLvl * 8000) +
+        (Math.random() - 0.5) * BALANCE.goldenEvent.delayVarianceMs
+    );
 
     const timer = setTimeout(() => {
       // Spawn golden matthew
@@ -33,8 +37,8 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({ state, s
       setIsActive(true);
       soundManager.playGoldenSpawn();
 
-      // Duration: 10s base + 3s with resonance
-      const duration = 10000 + resonanceLvl * 3000;
+      // Flight duration
+      const duration = BALANCE.goldenEvent.flightDurationMs + resonanceLvl * 2000;
       setTimeout(() => {
         setIsActive(false);
       }, duration);
@@ -73,22 +77,24 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({ state, s
     soundManager.playCrit();
     particleEngine.emitClick(e.clientX, e.clientY, true, 25);
 
-    // Roll reward: 50% 7x Frenzy for 15s, 50% Huge Coin Bounty
-    const isFrenzy = Math.random() > 0.4;
+    // Roll reward: 50% Frenzy, 50% Coin Bounty
+    const isFrenzy = Math.random() > 0.45;
     const cps = calculateCPS(state);
     const { totalPower } = calculateClickPower(state);
 
     if (isFrenzy) {
       setState((prev) => ({
         ...prev,
-        frenzyTimer: 15,
-        frenzyMultiplier: 7,
+        frenzyTimer: BALANCE.goldenEvent.frenzyDurationSec,
+        frenzyMultiplier: BALANCE.goldenEvent.frenzyMultiplier,
         goldenMatthewsClicked: prev.goldenMatthewsClicked + 1,
       }));
-      onSpawnBonus('⚡ 7X COIN FRENZY ACTIVATED FOR 15s! ⚡');
+      onSpawnBonus(`⚡ ${BALANCE.goldenEvent.frenzyMultiplier}X COIN FRENZY FOR ${BALANCE.goldenEvent.frenzyDurationSec}s! ⚡`);
     } else {
-      // Coin bounty: either 120 seconds of CPS or 50 clicks
-      const bounty = Math.max(500, Math.floor(cps * 120 + totalPower * 50));
+      const bounty = Math.max(
+        BALANCE.goldenEvent.minBountyFloor,
+        Math.floor(cps * BALANCE.goldenEvent.bountyCpsSeconds + totalPower * BALANCE.goldenEvent.bountyClickCount)
+      );
       setState((prev) => ({
         ...prev,
         coins: prev.coins + bounty,

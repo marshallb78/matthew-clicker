@@ -1,6 +1,7 @@
 import { UPGRADES } from '../data/upgrades';
 import { SKINS } from '../data/skins';
 import { PRESTIGE_UPGRADES } from '../data/prestige';
+import { BALANCE } from '../data/balance';
 import { GameState } from '../types/game';
 
 export function getUpgradeCost(baseCost: number, multiplier: number, currentLevel: number): number {
@@ -35,9 +36,6 @@ export function getMaxAffordableUpgrade(
 
   const a = nextCost;
   const r = multiplier;
-  // coins >= a * (r^n - 1) / (r - 1)
-  // (coins * (r - 1) / a) + 1 >= r^n
-  // n = floor(log_r( ... ))
   const term = (currentCoins * (r - 1) / a) + 1;
   const count = Math.max(1, Math.floor(Math.log(term) / Math.log(r)));
   const { totalCost } = getBulkUpgradeCost(baseCost, multiplier, currentLevel, count);
@@ -52,7 +50,7 @@ export function calculateClickPower(state: GameState): {
   critMultiplier: number;
   comboMultiplier: number;
 } {
-  let basePower = 1;
+  let basePower = BALANCE.click.basePower;
 
   // Add upgrade power
   for (const upgrade of UPGRADES) {
@@ -65,12 +63,13 @@ export function calculateClickPower(state: GameState): {
   // Equipped Skin
   const equippedSkin = SKINS.find((s) => s.id === state.equippedSkin) || SKINS[0];
   const skinClickMult = equippedSkin.clickBonusMultiplier || 1.0;
-  let critChance = 0.05 + (equippedSkin.critBonusChance || 0);
-  let critMultiplier = 5.0;
+  let critChance = BALANCE.click.baseCritChance + (equippedSkin.critBonusChance || 0);
+  let critMultiplier = BALANCE.click.baseCritMultiplier;
 
-  // Prestige Multipliers
-  const shardBonusMult = 1 + state.prestigeShards * 0.02; // +2% per unspent shard
+  // Prestige Shards
+  const shardBonusMult = 1 + state.prestigeShards * BALANCE.prestige.unspentShardBonus;
 
+  // Prestige Upgrades
   let prestigeClickMult = 1.0;
   for (const pUp of PRESTIGE_UPGRADES) {
     const lvl = state.prestigeUpgrades[pUp.id] || 0;
@@ -82,15 +81,20 @@ export function calculateClickPower(state: GameState): {
     }
   }
 
-  // Combo multiplier: decays unless clicked rapidly. Up to 3.0x at 40 combo
-  const comboMultiplier = 1 + Math.min(state.combo * 0.05, 2.0);
+  // Combo multiplier: capped at +20% at 20 combo
+  const effectiveCombo = Math.min(state.combo, BALANCE.click.comboMax);
+  const comboMultiplier = 1 + effectiveCombo * BALANCE.click.comboBonusPerStack;
 
-  // Frenzy Multiplier (e.g. 7x during Golden Matthew event)
+  // Frenzy Multiplier
   const frenzyMult = state.frenzyTimer > 0 ? state.frenzyMultiplier : 1.0;
+
+  // Achievement Production Bonus (+1% per achievement unlocked)
+  const achievementCount = state.unlockedAchievements ? state.unlockedAchievements.length : 0;
+  const achievementMult = 1 + achievementCount * BALANCE.achievements.perAchievementBonusMultiplier;
 
   const totalPower = Math.max(
     1,
-    Math.floor(basePower * skinClickMult * prestigeClickMult * shardBonusMult * comboMultiplier * frenzyMult)
+    Math.floor(basePower * skinClickMult * prestigeClickMult * shardBonusMult * comboMultiplier * frenzyMult * achievementMult)
   );
 
   return {
@@ -119,7 +123,7 @@ export function calculateCPS(state: GameState): number {
   const skinCpsMult = equippedSkin.cpsBonusMultiplier || 1.0;
 
   // Prestige Shards
-  const shardBonusMult = 1 + state.prestigeShards * 0.02;
+  const shardBonusMult = 1 + state.prestigeShards * BALANCE.prestige.unspentShardBonus;
 
   // Prestige Upgrades
   let prestigeCpsMult = 1.0;
@@ -133,7 +137,11 @@ export function calculateCPS(state: GameState): number {
   // Frenzy Multiplier
   const frenzyMult = state.frenzyTimer > 0 ? state.frenzyMultiplier : 1.0;
 
-  return Math.max(0, rawCps * skinCpsMult * prestigeCpsMult * shardBonusMult * frenzyMult);
+  // Achievement Production Bonus (+1% per achievement unlocked)
+  const achievementCount = state.unlockedAchievements ? state.unlockedAchievements.length : 0;
+  const achievementMult = 1 + achievementCount * BALANCE.achievements.perAchievementBonusMultiplier;
+
+  return Math.max(0, rawCps * skinCpsMult * prestigeCpsMult * shardBonusMult * frenzyMult * achievementMult);
 }
 
 export function calculateOfflineEarnings(
@@ -152,17 +160,16 @@ export function calculateOfflineEarnings(
     return { elapsedSeconds: 0, coinsEarned: 0 };
   }
 
-  // Base cap: 8 hours (28,800s). Quantum time perk extends up to 16h
+  // Base cap from BALANCE.offline.maxHours (8h = 28,800s). Quantum perk extends up to 16h
   const quantumLvl = state.prestigeUpgrades['quantum_time'] || 0;
-  const maxOfflineSeconds = 28800 + quantumLvl * 5760; // up to 16 hours
+  const maxOfflineSeconds = (BALANCE.offline.maxHours * 3600) + quantumLvl * 5760;
 
   const effectiveSeconds = Math.min(diffSec, maxOfflineSeconds);
 
   const cps = calculateCPS(state);
-  // Base 60% offline efficiency, up to 100% with perk
-  const efficiency = Math.min(1.0, 0.60 + quantumLvl * 0.08);
+  // Base 50% offline efficiency, up to 100% with perk
+  const efficiency = Math.min(1.0, BALANCE.offline.efficiency + quantumLvl * 0.08);
 
   const coinsEarned = Math.floor(cps * effectiveSeconds * efficiency);
   return { elapsedSeconds: effectiveSeconds, coinsEarned };
 }
-

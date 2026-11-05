@@ -6,9 +6,7 @@ export interface Skin {
   rarity: SkinRarity;
   description: string;
   perkDescription: string;
-  image: string; // for backward compatibility, points to normalImage
-  normalImage: string;
-  tongueImage: string;
+  image: string;
   cost: number;
   rebirthRequired?: number;
   clickBonusMultiplier: number;
@@ -98,6 +96,7 @@ export interface GameState {
   lastSaveTime: number;
   totalPlaytimeSeconds: number;
   goldenMatthewsClicked: number;
+  selectedEnvironment?: string;
   settings: GameSettings;
 }
 

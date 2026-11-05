@@ -1,11 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GameState, FloatingNumber } from '../types/game';
 import { SKINS } from '../data/skins';
+import { ENVIRONMENTS } from '../data/environments';
 import { formatCoins } from '../utils/formatters';
 import { calculateClickPower, calculateCPS } from '../utils/calculations';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
-import { Volume2, VolumeX, Settings as SettingsIcon, Flame } from 'lucide-react';
+import { EnvironmentBackground } from './EnvironmentBackground';
+import { Volume2, VolumeX, Settings as SettingsIcon, Flame, Target } from 'lucide-react';
 
 interface ClickerAreaProps {
   state: GameState;
@@ -21,38 +23,23 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   onOpenSettings,
 }) => {
   const [isSquashing, setIsSquashing] = useState(false);
-  const [isTongueOut, setIsTongueOut] = useState(false);
   const [floatingNumbers, setFloatingNumbers] = useState<FloatingNumber[]>([]);
   const characterRef = useRef<HTMLDivElement | null>(null);
-  const tongueTimeoutRef = useRef<number | null>(null);
   const squashTimeoutRef = useRef<number | null>(null);
 
   const equippedSkin = SKINS.find((s) => s.id === state.equippedSkin) || SKINS[0];
   const { totalPower, critChance, critMultiplier } = calculateClickPower(state);
   const cps = calculateCPS(state);
 
-  // Preload current skin images immediately for zero-flicker transitions
+  // Preload current skin image for immediate texture availability
   useEffect(() => {
-    const imgNormal = new Image();
-    imgNormal.src = equippedSkin.normalImage;
-    const imgTongue = new Image();
-    imgTongue.src = equippedSkin.tongueImage;
+    const img = new Image();
+    img.src = equippedSkin.image;
   }, [equippedSkin]);
-
-  // Preload all skin assets in the background on initial load
-  useEffect(() => {
-    SKINS.forEach((skin) => {
-      const n = new Image();
-      n.src = skin.normalImage;
-      const t = new Image();
-      t.src = skin.tongueImage;
-    });
-  }, []);
 
   // Cleanup timeouts on unmount
   useEffect(() => {
     return () => {
-      if (tongueTimeoutRef.current) window.clearTimeout(tongueTimeoutRef.current);
       if (squashTimeoutRef.current) window.clearTimeout(squashTimeoutRef.current);
     };
   }, []);
@@ -88,17 +75,12 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
 
     particleEngine.emitClick(clientX, clientY, isCrit, 8);
 
-    // Squash animation
+    // Responsive squash-and-stretch bounce
     setIsSquashing(true);
     if (squashTimeoutRef.current) window.clearTimeout(squashTimeoutRef.current);
-    squashTimeoutRef.current = window.setTimeout(() => setIsSquashing(false), 140);
+    squashTimeoutRef.current = window.setTimeout(() => setIsSquashing(false), 130);
 
-    // Tongue-out click expression (reverts after 220ms, resets immediately on rapid clicks)
-    setIsTongueOut(true);
-    if (tongueTimeoutRef.current) window.clearTimeout(tongueTimeoutRef.current);
-    tongueTimeoutRef.current = window.setTimeout(() => setIsTongueOut(false), 220);
-
-    // Floating text
+    // Floating coin text
     const floatId = Date.now() + Math.random();
     const floatX = clientX + (Math.random() - 0.5) * 50;
     const floatY = clientY - 40;
@@ -124,15 +106,46 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
     }));
   };
 
+  // --- MILESTONE PROGRESS TRACKING ---
+  // Determine next worthwhile unlock goal (Next skin or next environment)
+  const nextLockedSkin = SKINS.find((s) => !state.unlockedSkins.includes(s.id) && s.cost > 0);
+  const nextLockedEnv = ENVIRONMENTS.find(
+    (e) => e.unlockCoins && state.lifetimeCoins < e.unlockCoins
+  );
+
+  let nextGoalTitle = 'Cosmic Mastery';
+  let nextGoalTarget = 1;
+  let nextGoalCurrent = 1;
+  let nextGoalIcon = '👑';
+
+  if (nextLockedSkin && (!nextLockedEnv || nextLockedSkin.cost <= (nextLockedEnv.unlockCoins || Infinity))) {
+    nextGoalTitle = nextLockedSkin.name;
+    nextGoalTarget = nextLockedSkin.cost;
+    nextGoalCurrent = state.coins;
+    nextGoalIcon = '✨';
+  } else if (nextLockedEnv && nextLockedEnv.unlockCoins) {
+    nextGoalTitle = nextLockedEnv.name;
+    nextGoalTarget = nextLockedEnv.unlockCoins;
+    nextGoalCurrent = state.lifetimeCoins;
+    nextGoalIcon = nextLockedEnv.icon;
+  }
+
+  const goalPercent = Math.min(100, Math.floor((nextGoalCurrent / nextGoalTarget) * 100));
+
   return (
     <div className="relative flex-1 flex flex-col items-center justify-between h-full p-4 select-none overflow-hidden">
-      {/* TOP BAR: CONTROLS & CURRENCY */}
+      {/* 1. DYNAMIC UNLOCKABLE ENVIRONMENT BACKGROUND */}
+      <EnvironmentBackground
+        state={state}
+        onSelectEnvironment={(id) => setState((prev) => ({ ...prev, selectedEnvironment: id }))}
+      />
+
+      {/* 2. TOP BAR: CONTROLS & FRENZY */}
       <div className="w-full flex items-center justify-between pt-2 px-2 z-20">
-        {/* SMALL QUICK CONTROLS */}
         <div className="flex items-center gap-2">
           <button
             onClick={toggleMute}
-            className="w-10 h-10 rounded-2xl bg-slate-900/80 border-2 border-slate-700/80 hover:border-amber-400/80 flex items-center justify-center text-slate-300 hover:text-white transition shadow-md active:scale-90"
+            className="w-10 h-10 rounded-2xl bg-slate-900/80 backdrop-blur-md border-2 border-slate-700/80 hover:border-amber-400/80 flex items-center justify-center text-slate-300 hover:text-white transition shadow-md active:scale-90"
             title={state.settings.isMuted ? 'Unmute' : 'Mute'}
           >
             {state.settings.isMuted ? (
@@ -144,7 +157,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
 
           <button
             onClick={onOpenSettings}
-            className="w-10 h-10 rounded-2xl bg-slate-900/80 border-2 border-slate-700/80 hover:border-cyan-400/80 flex items-center justify-center text-slate-300 hover:text-white transition shadow-md active:scale-90"
+            className="w-10 h-10 rounded-2xl bg-slate-900/80 backdrop-blur-md border-2 border-slate-700/80 hover:border-cyan-400/80 flex items-center justify-center text-slate-300 hover:text-white transition shadow-md active:scale-90"
             title="Settings & Stats"
           >
             <SettingsIcon className="w-5 h-5 text-cyan-400" />
@@ -155,12 +168,12 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
         {state.frenzyTimer > 0 && (
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-red-500 to-amber-500 text-white font-extrabold text-xs shadow-lg shadow-amber-500/40 animate-pulse">
             <Flame className="w-4 h-4" />
-            <span>7X FRENZY ({Math.ceil(state.frenzyTimer)}s)</span>
+            <span>{state.frenzyMultiplier}X FRENZY ({Math.ceil(state.frenzyTimer)}s)</span>
           </div>
         )}
       </div>
 
-      {/* BIG CHUNKY COIN COUNTER */}
+      {/* 3. BIG CHUNKY COIN COUNTER */}
       <div className="flex flex-col items-center z-20 my-auto sm:my-2">
         <div className="flex items-center gap-2 drop-shadow-[0_4px_12px_rgba(0,0,0,0.6)]">
           <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-gradient-to-tr from-amber-500 to-yellow-300 border-2 border-white flex items-center justify-center text-slate-950 font-black text-xl sm:text-2xl shadow-lg shadow-yellow-500/40">
@@ -171,17 +184,31 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5 mt-1 text-xs sm:text-sm font-bold text-slate-300/90 bg-slate-950/60 px-3.5 py-0.5 rounded-full border border-slate-800">
+        <div className="flex items-center gap-1.5 mt-1 text-xs sm:text-sm font-bold text-slate-300/90 bg-slate-950/70 backdrop-blur-md px-3.5 py-0.5 rounded-full border border-slate-800">
           <span>{formatCoins(cps)}</span>
           <span className="text-slate-400 font-semibold">per second</span>
         </div>
+
+        {/* NEXT GOAL MILESTONE PROGRESS BAR */}
+        <div className="mt-2.5 flex flex-col items-center gap-1 bg-slate-950/70 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-slate-800/80 shadow-md max-w-xs w-full">
+          <div className="flex items-center justify-between w-full text-[11px] font-black">
+            <span className="flex items-center gap-1 text-slate-300">
+              <Target className="w-3 h-3 text-amber-400" />
+              <span>Next: {nextGoalIcon} {nextGoalTitle}</span>
+            </span>
+            <span className="text-amber-300 font-mono">{goalPercent}%</span>
+          </div>
+          <div className="w-full h-2 rounded-full bg-slate-900 border border-slate-800 overflow-hidden relative">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-amber-500 to-yellow-300 transition-all duration-300 shadow-sm shadow-yellow-400/50"
+              style={{ width: `${goalPercent}%` }}
+            />
+          </div>
+        </div>
       </div>
 
-      {/* CENTRAL HERO MATTHEW CHARACTER */}
+      {/* 4. CENTRAL HERO MATTHEW CHARACTER */}
       <div className="relative flex-1 flex items-center justify-center w-full z-10 py-2">
-        {/* Soft Radial Ambient Glow */}
-        <div className="absolute w-64 h-64 sm:w-96 sm:h-96 rounded-full bg-amber-500/10 blur-3xl pointer-events-none" />
-
         <div
           ref={characterRef}
           onMouseDown={handleClick}
@@ -193,35 +220,25 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
         >
           <div className="relative w-60 h-60 sm:w-80 sm:h-80 md:w-96 md:h-96 max-w-[85vw] max-h-[50vh] flex items-center justify-center">
             <img
-              src={equippedSkin.normalImage}
-              alt={`${equippedSkin.name} normal`}
+              src={equippedSkin.image}
+              alt={equippedSkin.name}
               draggable={false}
-              className={`w-full h-full object-contain pointer-events-none drop-shadow-[0_20px_25px_rgba(0,0,0,0.6)] ${
-                isTongueOut ? 'hidden' : 'block'
-              }`}
-            />
-            <img
-              src={equippedSkin.tongueImage}
-              alt={`${equippedSkin.name} tongue`}
-              draggable={false}
-              className={`w-full h-full object-contain pointer-events-none drop-shadow-[0_20px_25px_rgba(0,0,0,0.6)] ${
-                isTongueOut ? 'block' : 'hidden'
-              }`}
+              className="w-full h-full object-contain pointer-events-none drop-shadow-[0_20px_25px_rgba(0,0,0,0.6)]"
             />
           </div>
         </div>
       </div>
 
-      {/* COMPACT EQUIPPED SKIN LABEL */}
+      {/* 5. COMPACT EQUIPPED SKIN LABEL */}
       <div className="z-10 pb-2">
-        <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-700/80 px-3.5 py-1 rounded-full text-xs font-bold shadow-md">
+        <div className="flex items-center gap-2 bg-slate-900/80 backdrop-blur-md border border-slate-700/80 px-3.5 py-1 rounded-full text-xs font-bold shadow-md">
           <span className="text-slate-400">Character:</span>
           <span className="text-amber-300">{equippedSkin.name}</span>
           <span className="text-[10px] text-cyan-400 font-semibold">({equippedSkin.perkDescription})</span>
         </div>
       </div>
 
-      {/* FLOATING COIN DAMAGE POPUPS */}
+      {/* 6. FLOATING COIN DAMAGE POPUPS */}
       {floatingNumbers.map((f) => (
         <div
           key={f.id}

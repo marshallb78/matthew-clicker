@@ -13,6 +13,8 @@ import { formatCoins, formatTime } from '../src/utils/formatters';
 import { UPGRADES } from '../src/data/upgrades';
 import { SKINS } from '../src/data/skins';
 import { ACHIEVEMENTS } from '../src/data/achievements';
+import { ENVIRONMENTS } from '../src/data/environments';
+import { BALANCE } from '../src/data/balance';
 
 describe('Matthew Clicker Core Gameplay Tests', () => {
   let state = getDefaultGameState();
@@ -24,8 +26,8 @@ describe('Matthew Clicker Core Gameplay Tests', () => {
   describe('Economy & Calculations', () => {
     it('calculates initial click power and zero CPS correctly', () => {
       const { totalPower, critChance, comboMultiplier } = calculateClickPower(state);
-      expect(totalPower).toBe(1);
-      expect(critChance).toBeCloseTo(0.05);
+      expect(totalPower).toBe(BALANCE.click.basePower);
+      expect(critChance).toBeCloseTo(BALANCE.click.baseCritChance);
       expect(comboMultiplier).toBe(1.0);
 
       const cps = calculateCPS(state);
@@ -33,7 +35,7 @@ describe('Matthew Clicker Core Gameplay Tests', () => {
     });
 
     it('calculates upgrade costs with exponential scaling', () => {
-      const upgrade = UPGRADES[0]; // Stronger Clicks
+      const upgrade = UPGRADES[0]; // Finger Exercise
       const cost0 = getUpgradeCost(upgrade.baseCost, upgrade.costMultiplier, 0);
       const cost1 = getUpgradeCost(upgrade.baseCost, upgrade.costMultiplier, 1);
       const cost2 = getUpgradeCost(upgrade.baseCost, upgrade.costMultiplier, 2);
@@ -69,7 +71,6 @@ describe('Matthew Clicker Core Gameplay Tests', () => {
       const canBuy = state.coins >= cost;
       expect(canBuy).toBe(false);
 
-      // Attempting to deduct cost when not affordable must not make coins negative
       if (canBuy) {
         state.coins -= cost;
       }
@@ -77,22 +78,28 @@ describe('Matthew Clicker Core Gameplay Tests', () => {
     });
 
     it('scales click power when click upgrades are leveled', () => {
-      state.upgrades['stronger_clicks'] = 5; // +1 * 5 = +5
+      state.upgrades['finger_exercise'] = 5; // +1 * 5 = +5
       const { totalPower } = calculateClickPower(state);
       expect(totalPower).toBe(6); // base 1 + 5 = 6
     });
 
     it('scales CPS when passive upgrades are leveled', () => {
-      state.upgrades['matthew_mouse'] = 3; // +3 * 3 = 9
+      state.upgrades['autoclicker_bot'] = 4; // +1.5 * 4 = 6.0
       const cps = calculateCPS(state);
-      expect(cps).toBe(9);
+      expect(cps).toBe(6.0);
     });
 
-    it('applies combo multipliers up to 3x', () => {
-      state.combo = 20; // 1 + 20 * 0.05 = 2.0x
-      const { comboMultiplier, totalPower } = calculateClickPower(state);
-      expect(comboMultiplier).toBe(2.0);
-      expect(totalPower).toBe(2);
+    it('applies combo multipliers capped at max combo bonus', () => {
+      state.combo = 20; // 1 + 20 * 0.01 = 1.20x
+      const { comboMultiplier } = calculateClickPower(state);
+      expect(comboMultiplier).toBeCloseTo(1.20);
+    });
+
+    it('applies permanent achievement boost of +1% per unlocked achievement', () => {
+      state.unlockedAchievements = ['first_click', 'first_upgrade', 'combo_starter']; // 3 achievements = +3%
+      state.upgrades['finger_exercise'] = 99; // basePower = 100
+      const { totalPower } = calculateClickPower(state);
+      expect(totalPower).toBe(103); // 100 * 1.03 = 103
     });
   });
 
@@ -109,7 +116,7 @@ describe('Matthew Clicker Core Gameplay Tests', () => {
 
     it('applies permanent shard multiplier to earnings', () => {
       state.prestigeShards = 10; // +20% bonus
-      state.upgrades['stronger_clicks'] = 10;
+      state.upgrades['finger_exercise'] = 10;
       const { totalPower } = calculateClickPower(state);
       expect(totalPower).toBeGreaterThan(11);
     });
@@ -117,7 +124,7 @@ describe('Matthew Clicker Core Gameplay Tests', () => {
 
   describe('Offline Earnings Calculation', () => {
     it('caps offline earnings at 8 hours (28,800 seconds)', () => {
-      state.upgrades['matthew_mouse'] = 10; // 30 CPS
+      state.upgrades['autoclicker_bot'] = 10; // 15 CPS
       state.lastSaveTime = Date.now() - 3600 * 24 * 1000; // 24 hours ago
       const nowSec = Math.floor(Date.now() / 1000);
 
@@ -132,7 +139,7 @@ describe('Matthew Clicker Core Gameplay Tests', () => {
       state.coins = 42500;
       state.lifetimeCoins = 150000;
       state.clicks = 350;
-      state.upgrades['stronger_clicks'] = 12;
+      state.upgrades['finger_exercise'] = 12;
       state.unlockedSkins = ['classic_matthew', 'sad_matthew'];
       state.equippedSkin = 'sad_matthew';
 
@@ -144,7 +151,7 @@ describe('Matthew Clicker Core Gameplay Tests', () => {
       expect(imported.coins).toBe(42500);
       expect(imported.lifetimeCoins).toBe(150000);
       expect(imported.clicks).toBe(350);
-      expect(imported.upgrades['stronger_clicks']).toBe(12);
+      expect(imported.upgrades['finger_exercise']).toBe(12);
       expect(imported.equippedSkin).toBe('sad_matthew');
       expect(imported.unlockedSkins).toContain('sad_matthew');
     });
@@ -172,7 +179,7 @@ describe('Matthew Clicker Core Gameplay Tests', () => {
     });
   });
 
-  describe('Content Completeness', () => {
+  describe('Content Completeness & Tongue Removal', () => {
     it('has all 16 required Matthew skins', () => {
       expect(SKINS.length).toBe(16);
       const expectedSkins = [
@@ -199,13 +206,23 @@ describe('Matthew Clicker Core Gameplay Tests', () => {
       });
     });
 
-    it('has at least 12 working upgrades', () => {
-      expect(UPGRADES.length).toBeGreaterThanOrEqual(12);
+    it('has zero tongue-out properties in skin data', () => {
+      SKINS.forEach((skin: any) => {
+        expect(skin.tongueImage).toBeUndefined();
+      });
+    });
+
+    it('has at least 14 working upgrades', () => {
+      expect(UPGRADES.length).toBeGreaterThanOrEqual(14);
     });
 
     it('has at least 15 achievements', () => {
       expect(ACHIEVEMENTS.length).toBeGreaterThanOrEqual(15);
     });
+
+    it('has 7 unlockable background environments', () => {
+      expect(ENVIRONMENTS.length).toBe(7);
+      expect(ENVIRONMENTS[0].id).toBe('matthew_room');
+    });
   });
 });
-

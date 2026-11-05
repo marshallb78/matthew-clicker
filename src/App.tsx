@@ -9,6 +9,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { ParticleCanvas } from './components/ParticleCanvas';
 import { GoldenMatthewEvent } from './components/GoldenMatthewEvent';
 import { OfflineProgressModal } from './components/OfflineProgressModal';
+import { BALANCE } from './data/balance';
 import { X, Sparkles, ChevronUp, ChevronDown } from 'lucide-react';
 
 interface Toast {
@@ -66,8 +67,8 @@ export function App() {
       lifetimeCoins: prev.lifetimeCoins + amount,
       clicks: isClick ? prev.clicks + 1 : prev.clicks,
       criticalClicks: isCrit ? prev.criticalClicks + 1 : prev.criticalClicks,
-      combo: isClick ? Math.min(prev.combo + 1, 40) : prev.combo,
-      comboTimer: isClick ? 1.8 : prev.comboTimer,
+      combo: isClick ? Math.min(prev.combo + 1, BALANCE.click.comboMax) : prev.combo,
+      comboTimer: isClick ? BALANCE.click.comboTimerResetSec : prev.comboTimer,
     }));
   };
 
