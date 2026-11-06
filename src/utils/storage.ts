@@ -1,4 +1,6 @@
 import { GameState } from '../types/game';
+import { calculateCPS } from './calculations';
+import { isValidSkinId, checkAndApplyMilestoneUnlocks } from '../data/skins';
 
 const SAVE_KEY = 'matthew_clicker_save_v1';
 
@@ -49,7 +51,7 @@ export function saveGame(state: GameState): boolean {
       ...state,
       lastSaveTime: Date.now(),
     };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(toSave));
+    window.localStorage.setItem(SAVE_KEY, JSON.stringify(toSave));
     return true;
   } catch (err) {
     console.error('Failed to save game state to localStorage:', err);
@@ -57,48 +59,147 @@ export function saveGame(state: GameState): boolean {
   }
 }
 
+/**
+ * Safely sanitizes, migrates, and validates a parsed save object.
+ * - Preserves legitimate unlocked skins.
+ * - Validates equipped skin against the unlocked collection; falls back to Classic Matthew if invalid/locked.
+ * - NEVER grants a skin solely because an old save claims it is equipped.
+ * - Recalculates milestone eligibility and unlocks/equips newly earned skins.
+ * - Leaves coins, upgrades, achievements, and prestige stats intact without data loss.
+ */
+export function sanitizeAndValidateGameState(parsed: any): GameState {
+  const def = getDefaultGameState();
+  if (!parsed || typeof parsed !== 'object') {
+    return def;
+  }
+
+  // 1. Sanitize raw numeric and object stats safely
+  const coins = Math.max(0, typeof parsed.coins === 'number' && !isNaN(parsed.coins) ? parsed.coins : def.coins);
+  const lifetimeCoins = Math.max(
+    0,
+    typeof parsed.lifetimeCoins === 'number' && !isNaN(parsed.lifetimeCoins)
+      ? parsed.lifetimeCoins
+      : Math.max(coins, def.lifetimeCoins)
+  );
+  const clicks = Math.max(0, typeof parsed.clicks === 'number' && !isNaN(parsed.clicks) ? parsed.clicks : def.clicks);
+  const criticalClicks = Math.max(
+    0,
+    typeof parsed.criticalClicks === 'number' && !isNaN(parsed.criticalClicks) ? parsed.criticalClicks : def.criticalClicks
+  );
+  const upgrades = parsed.upgrades && typeof parsed.upgrades === 'object' ? parsed.upgrades : def.upgrades;
+  const unlockedAchievements = Array.isArray(parsed.unlockedAchievements)
+    ? parsed.unlockedAchievements
+    : def.unlockedAchievements;
+
+  const prestigeCount = Math.max(
+    0,
+    typeof parsed.prestigeCount === 'number' && !isNaN(parsed.prestigeCount) ? parsed.prestigeCount : def.prestigeCount
+  );
+  const prestigeShards = Math.max(
+    0,
+    typeof parsed.prestigeShards === 'number' && !isNaN(parsed.prestigeShards) ? parsed.prestigeShards : def.prestigeShards
+  );
+  const lifetimePrestigeShards = Math.max(
+    0,
+    typeof parsed.lifetimePrestigeShards === 'number' && !isNaN(parsed.lifetimePrestigeShards)
+      ? parsed.lifetimePrestigeShards
+      : def.lifetimePrestigeShards
+  );
+  const prestigeUpgrades =
+    parsed.prestigeUpgrades && typeof parsed.prestigeUpgrades === 'object'
+      ? parsed.prestigeUpgrades
+      : def.prestigeUpgrades;
+
+  const lastSaveTime =
+    typeof parsed.lastSaveTime === 'number' && !isNaN(parsed.lastSaveTime) ? parsed.lastSaveTime : Date.now();
+  const totalPlaytimeSeconds = Math.max(
+    0,
+    typeof parsed.totalPlaytimeSeconds === 'number' && !isNaN(parsed.totalPlaytimeSeconds)
+      ? parsed.totalPlaytimeSeconds
+      : def.totalPlaytimeSeconds
+  );
+  const goldenMatthewsClicked = Math.max(
+    0,
+    typeof parsed.goldenMatthewsClicked === 'number' && !isNaN(parsed.goldenMatthewsClicked)
+      ? parsed.goldenMatthewsClicked
+      : def.goldenMatthewsClicked
+  );
+  const settings = {
+    ...def.settings,
+    ...(parsed.settings && typeof parsed.settings === 'object' ? parsed.settings : {}),
+  };
+
+  // 2. Preserve legitimate unlocked skins, strictly discarding non-existent IDs.
+  // Classic Matthew is always unlocked.
+  let validUnlockedSkins: string[] = ['classic_matthew'];
+  if (Array.isArray(parsed.unlockedSkins)) {
+    const legitimate = parsed.unlockedSkins.filter(
+      (id: unknown): id is string => typeof id === 'string' && isValidSkinId(id)
+    );
+    validUnlockedSkins = Array.from(new Set(['classic_matthew', ...legitimate]));
+  }
+
+  // 3. Validate equipped skin against legitimate unlocked collection.
+  // NEVER grant a skin solely because an old save claims it was equipped.
+  // If the equipped skin is locked, missing, or invalid, safely fall back to Classic Matthew.
+  const hasValidEquippedSkin =
+    typeof parsed.equippedSkin === 'string' &&
+    isValidSkinId(parsed.equippedSkin) &&
+    validUnlockedSkins.includes(parsed.equippedSkin);
+
+  const initialEquippedSkin = hasValidEquippedSkin ? parsed.equippedSkin : 'classic_matthew';
+
+  const baseState: GameState = {
+    coins,
+    lifetimeCoins,
+    clicks,
+    criticalClicks,
+    combo: 0,
+    comboTimer: 0,
+    frenzyTimer: 0,
+    frenzyMultiplier: 1,
+
+    upgrades,
+    equippedSkin: initialEquippedSkin,
+    unlockedSkins: validUnlockedSkins,
+    unlockedAchievements,
+
+    prestigeCount,
+    prestigeShards,
+    lifetimePrestigeShards,
+    prestigeUpgrades,
+
+    lastSaveTime,
+    totalPlaytimeSeconds,
+    goldenMatthewsClicked,
+    settings,
+  };
+
+  // 4. Recalculate milestone eligibility using existing progression rules.
+  // Automatically unlock newly earned skins.
+  // Only auto-equip on load if the save did not already have a valid equipped skin
+  // (e.g. if the equipped skin was missing/invalid/locked, or newly migrating).
+  // If the player already had a legitimate equipped skin, preserve their choice across refreshes.
+  const currentCps = calculateCPS(baseState);
+  const shouldAutoEquip = !hasValidEquippedSkin;
+  const { state: reconciledState } = checkAndApplyMilestoneUnlocks(baseState, currentCps, shouldAutoEquip);
+
+  return reconciledState;
+}
+
 export function loadGame(): GameState {
   try {
     if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
       return getDefaultGameState();
     }
-    const raw = localStorage.getItem(SAVE_KEY);
+    const raw = window.localStorage.getItem(SAVE_KEY);
     if (!raw) return getDefaultGameState();
 
     const parsed = JSON.parse(raw);
-    const def = getDefaultGameState();
+    const sanitized = sanitizeAndValidateGameState(parsed);
 
-    // Sanitize and migrate numbers to prevent NaN or negative balances
-    const sanitized: GameState = {
-      coins: Math.max(0, typeof parsed.coins === 'number' && !isNaN(parsed.coins) ? parsed.coins : def.coins),
-      lifetimeCoins: Math.max(0, typeof parsed.lifetimeCoins === 'number' && !isNaN(parsed.lifetimeCoins) ? parsed.lifetimeCoins : def.lifetimeCoins),
-      clicks: Math.max(0, typeof parsed.clicks === 'number' && !isNaN(parsed.clicks) ? parsed.clicks : def.clicks),
-      criticalClicks: Math.max(0, typeof parsed.criticalClicks === 'number' && !isNaN(parsed.criticalClicks) ? parsed.criticalClicks : def.criticalClicks),
-      combo: 0,
-      comboTimer: 0,
-      frenzyTimer: 0,
-      frenzyMultiplier: 1,
-
-      upgrades: parsed.upgrades && typeof parsed.upgrades === 'object' ? parsed.upgrades : def.upgrades,
-      equippedSkin: typeof parsed.equippedSkin === 'string' ? parsed.equippedSkin : def.equippedSkin,
-      unlockedSkins: Array.isArray(parsed.unlockedSkins) && parsed.unlockedSkins.length > 0 ? parsed.unlockedSkins : def.unlockedSkins,
-      unlockedAchievements: Array.isArray(parsed.unlockedAchievements) ? parsed.unlockedAchievements : def.unlockedAchievements,
-
-      prestigeCount: Math.max(0, typeof parsed.prestigeCount === 'number' ? parsed.prestigeCount : def.prestigeCount),
-      prestigeShards: Math.max(0, typeof parsed.prestigeShards === 'number' ? parsed.prestigeShards : def.prestigeShards),
-      lifetimePrestigeShards: Math.max(0, typeof parsed.lifetimePrestigeShards === 'number' ? parsed.lifetimePrestigeShards : def.lifetimePrestigeShards),
-      prestigeUpgrades: parsed.prestigeUpgrades && typeof parsed.prestigeUpgrades === 'object' ? parsed.prestigeUpgrades : def.prestigeUpgrades,
-
-      lastSaveTime: typeof parsed.lastSaveTime === 'number' && !isNaN(parsed.lastSaveTime) ? parsed.lastSaveTime : Date.now(),
-      totalPlaytimeSeconds: Math.max(0, typeof parsed.totalPlaytimeSeconds === 'number' ? parsed.totalPlaytimeSeconds : def.totalPlaytimeSeconds),
-      goldenMatthewsClicked: Math.max(0, typeof parsed.goldenMatthewsClicked === 'number' ? parsed.goldenMatthewsClicked : def.goldenMatthewsClicked),
-
-      settings: {
-        ...def.settings,
-        ...(parsed.settings && typeof parsed.settings === 'object' ? parsed.settings : {}),
-      },
-    };
-
+    // Persist sanitized state so corrections are saved
+    saveGame(sanitized);
     return sanitized;
   } catch (err) {
     console.error('Save file corrupted, recovering default game state:', err);
@@ -123,43 +224,20 @@ export function importSaveString(encoded: string): GameState {
       throw new Error('Invalid save data format.');
     }
 
-    const def = getDefaultGameState();
-    const imported: GameState = {
-      coins: Math.max(0, typeof parsed.coins === 'number' && !isNaN(parsed.coins) ? parsed.coins : 0),
-      lifetimeCoins: Math.max(0, typeof parsed.lifetimeCoins === 'number' ? parsed.lifetimeCoins : 0),
-      clicks: Math.max(0, typeof parsed.clicks === 'number' ? parsed.clicks : 0),
-      criticalClicks: Math.max(0, typeof parsed.criticalClicks === 'number' ? parsed.criticalClicks : 0),
-      combo: 0,
-      comboTimer: 0,
-      frenzyTimer: 0,
-      frenzyMultiplier: 1,
-
-      upgrades: parsed.upgrades && typeof parsed.upgrades === 'object' ? parsed.upgrades : {},
-      equippedSkin: typeof parsed.equippedSkin === 'string' ? parsed.equippedSkin : def.equippedSkin,
-      unlockedSkins: Array.isArray(parsed.unlockedSkins) && parsed.unlockedSkins.length > 0 ? parsed.unlockedSkins : def.unlockedSkins,
-      unlockedAchievements: Array.isArray(parsed.unlockedAchievements) ? parsed.unlockedAchievements : [],
-
-      prestigeCount: Math.max(0, typeof parsed.prestigeCount === 'number' ? parsed.prestigeCount : 0),
-      prestigeShards: Math.max(0, typeof parsed.prestigeShards === 'number' ? parsed.prestigeShards : 0),
-      lifetimePrestigeShards: Math.max(0, typeof parsed.lifetimePrestigeShards === 'number' ? parsed.lifetimePrestigeShards : 0),
-      prestigeUpgrades: parsed.prestigeUpgrades && typeof parsed.prestigeUpgrades === 'object' ? parsed.prestigeUpgrades : {},
-
-      lastSaveTime: Date.now(),
-      totalPlaytimeSeconds: Math.max(0, typeof parsed.totalPlaytimeSeconds === 'number' ? parsed.totalPlaytimeSeconds : 0),
-      goldenMatthewsClicked: Math.max(0, typeof parsed.goldenMatthewsClicked === 'number' ? parsed.goldenMatthewsClicked : 0),
-      settings: def.settings,
-    };
-
+    const imported = sanitizeAndValidateGameState(parsed);
     saveGame(imported);
     return imported;
-  } catch (err) {
+  } catch (err: unknown) {
+    if ((err as Error)?.message === 'Invalid save data format.') {
+      throw err;
+    }
     throw new Error('Failed to import save code. Please ensure the code is valid.');
   }
 }
 
 export function clearSavedGame(): GameState {
   if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
-    localStorage.removeItem(SAVE_KEY);
+    window.localStorage.removeItem(SAVE_KEY);
   }
   return getDefaultGameState();
 }

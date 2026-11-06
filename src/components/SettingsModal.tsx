@@ -16,16 +16,14 @@ import {
   Copy,
   Check,
   AlertTriangle,
-  Sparkles,
 } from 'lucide-react';
 
 interface SettingsModalProps {
   state: GameState;
   setState: React.Dispatch<React.SetStateAction<GameState>>;
-  onOpenSkinQualityModal?: () => void;
 }
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ state, setState, onOpenSkinQualityModal }) => {
+export const SettingsModal: React.FC<SettingsModalProps> = ({ state, setState }) => {
   const [copied, setCopied] = useState(false);
   const [importString, setImportString] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
@@ -229,29 +227,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ state, setState, o
             </button>
           </div>
         </div>
-
-        {/* SKIN QUALITY CONTROL INSPECTOR */}
-        {onOpenSkinQualityModal && (
-          <div className="p-5 rounded-2xl bg-gradient-to-r from-[#181d36] to-[#1a2245] border-2 border-amber-500/40 shadow-xl backdrop-blur-md">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-black text-amber-300 flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-amber-400" />
-                  16-Skin Quality Control Inspector
-                </h3>
-                <p className="text-xs text-slate-300 mt-1">
-                  Compare all 16 skins side-by-side with calibrated facial landmarks, tilt angle, and full contact sheet.
-                </p>
-              </div>
-              <button
-                onClick={onOpenSkinQualityModal}
-                className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition shadow-md shadow-amber-500/20 active:scale-95 whitespace-nowrap ml-3"
-              >
-                Inspect All 16 Skins
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* LIFETIME STATISTICS */}
         <div className="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl backdrop-blur-md">

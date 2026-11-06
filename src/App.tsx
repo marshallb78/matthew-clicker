@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { GameState } from './types/game';
-import { loadGame } from './utils/storage';
+import { loadGame, saveGame } from './utils/storage';
+import { equipSkin } from './data/skins';
 import { calculateOfflineEarnings } from './utils/calculations';
 import { useGameLoop } from './hooks/useGameLoop';
 import { ClickerArea } from './components/ClickerArea';
@@ -72,6 +73,16 @@ export function App() {
       combo: isClick ? Math.min(prev.combo + 1, BALANCE.click.comboMax) : prev.combo,
       comboTimer: isClick ? BALANCE.click.comboTimerResetSec : prev.comboTimer,
     }));
+  };
+
+  const handleEquipSkin = (skinId: string) => {
+    setState((prev) => {
+      const next = equipSkin(prev, skinId);
+      if (next !== prev) {
+        saveGame(next);
+      }
+      return next;
+    });
   };
 
   return (
@@ -161,10 +172,6 @@ export function App() {
             <SettingsModal
               state={state}
               setState={setState}
-              onOpenSkinQualityModal={() => {
-                setShowSettings(false);
-                setShowSkinQualityModal(true);
-              }}
             />
           </div>
         </div>
@@ -175,7 +182,8 @@ export function App() {
         isOpen={showSkinQualityModal}
         onClose={() => setShowSkinQualityModal(false)}
         equippedSkinId={state.equippedSkin}
-        onEquipSkin={(skinId) => setState((prev) => ({ ...prev, equippedSkin: skinId }))}
+        unlockedSkinIds={state.unlockedSkins}
+        onEquipSkin={handleEquipSkin}
       />
 
       {/* OFFLINE EARNINGS POPUP */}

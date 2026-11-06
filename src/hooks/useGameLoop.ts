@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { GameState } from '../types/game';
 import { calculateCPS } from '../utils/calculations';
 import { ACHIEVEMENTS } from '../data/achievements';
-import { SKINS, getSkinMilestoneProgress } from '../data/skins';
+import { checkAndApplyMilestoneUnlocks, equipSkin } from '../data/skins';
 import { saveGame } from '../utils/storage';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from '../components/ParticleCanvas';
@@ -56,30 +56,34 @@ export function useGameLoop({ state, setState, onNotify }: UseGameLoopProps) {
     return () => clearInterval(interval);
   }, [setState]);
 
-  // PROGRESSION CHECKER (Achievements & Milestone Skin Unlocks, Every 1000ms)
+  // PROGRESSION CHECKER (Achievements & Milestone Skin Unlocks, Every 250ms)
   useEffect(() => {
     const checker = setInterval(() => {
       const current = stateRef.current;
       const currentCps = calculateCPS(current);
 
-      // 1. Check Skin Milestones (Characters Earned, Never Purchased!)
-      for (const skin of SKINS) {
-        if (!current.unlockedSkins.includes(skin.id)) {
-          const progress = getSkinMilestoneProgress(skin, current, currentCps);
-          if (progress.isMet) {
-            soundManager.playSkinUnlock();
-            particleEngine.emitPrestige();
-            onNotify(`NEW MATTHEW FORM EARNED!`, `${skin.name} unlocked! Milestone: ${skin.milestone.description}`);
+      // 1. Check Skin Milestones (Characters Earned, Automatically Equipped!)
+      const { state: reconciledState, newlyUnlocked } = checkAndApplyMilestoneUnlocks(current, currentCps);
+      if (newlyUnlocked.length > 0) {
+        soundManager.playSkinUnlock();
+        particleEngine.emitPrestige();
 
-            setState((prev) => ({
-              ...prev,
-              unlockedSkins: prev.unlockedSkins.includes(skin.id)
-                ? prev.unlockedSkins
-                : [...prev.unlockedSkins, skin.id],
-            }));
-            return; // Trigger 1 notification per cycle to avoid notification stacking
-          }
-        }
+        newlyUnlocked.forEach((skin) => {
+          onNotify(
+            'NEW MATTHEW FORM EARNED!',
+            `${skin.name} unlocked & equipped! Milestone: ${skin.milestone.description}`
+          );
+        });
+
+        setState((prev) => {
+          let nextState: GameState = {
+            ...prev,
+            unlockedSkins: Array.from(new Set([...prev.unlockedSkins, ...reconciledState.unlockedSkins])),
+          };
+          nextState = equipSkin(nextState, reconciledState.equippedSkin);
+          saveGame(nextState);
+          return nextState;
+        });
       }
 
       // 2. Check Achievements
@@ -102,7 +106,7 @@ export function useGameLoop({ state, setState, onNotify }: UseGameLoopProps) {
           }
         }
       }
-    }, 1000);
+    }, 250);
 
     return () => clearInterval(checker);
   }, [setState, onNotify]);

@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { SKINS, Skin } from '../data/skins';
 import { MATTHEW_LANDMARKS } from '../data/landmarks';
-import { X, Check, Eye, Sparkles, Layers } from 'lucide-react';
+import { X, Check, Eye, Sparkles, Layers, Lock } from 'lucide-react';
 
 interface SkinQualityModalProps {
   isOpen: boolean;
   onClose: () => void;
   onEquipSkin?: (skinId: string) => void;
   equippedSkinId: string;
+  unlockedSkinIds?: string[];
 }
 
 export const SkinQualityModal: React.FC<SkinQualityModalProps> = ({
@@ -15,6 +16,7 @@ export const SkinQualityModal: React.FC<SkinQualityModalProps> = ({
   onClose,
   onEquipSkin,
   equippedSkinId,
+  unlockedSkinIds,
 }) => {
   const [showLandmarks, setShowLandmarks] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'contact_sheet'>('grid');
@@ -98,6 +100,7 @@ export const SkinQualityModal: React.FC<SkinQualityModalProps> = ({
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
               {SKINS.map((skin) => {
                 const isEquipped = skin.id === equippedSkinId;
+                const isUnlocked = Array.isArray(unlockedSkinIds) ? unlockedSkinIds.includes(skin.id) : false;
 
                 // Color accent based on rarity
                 const rarityColors: Record<string, string> = {
@@ -169,17 +172,23 @@ export const SkinQualityModal: React.FC<SkinQualityModalProps> = ({
                         </span>
                       </div>
 
-                      {onEquipSkin && (
+                      {isEquipped ? (
+                        <div className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-black rounded-lg bg-green-500/20 text-green-300 border border-green-500/40">
+                          <Check className="w-3 h-3 stroke-[3]" />
+                          <span>Equipped</span>
+                        </div>
+                      ) : isUnlocked && onEquipSkin ? (
                         <button
                           onClick={() => onEquipSkin(skin.id)}
-                          className={`px-2.5 py-1 text-[11px] font-black rounded-lg transition ${
-                            isEquipped
-                              ? 'bg-green-500/20 text-green-300 border border-green-500/40'
-                              : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                          }`}
+                          className="px-2.5 py-1 text-[11px] font-black rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 transition cursor-pointer shadow-sm"
                         >
-                          {isEquipped ? 'Equipped' : 'Equip'}
+                          Equip
                         </button>
+                      ) : (
+                        <div className="flex items-center gap-1 px-2 py-1 text-[11px] font-bold rounded-lg bg-slate-900 border border-slate-750 text-slate-500">
+                          <Lock className="w-3 h-3 text-slate-500" />
+                          <span>Locked</span>
+                        </div>
                       )}
                     </div>
                   </div>

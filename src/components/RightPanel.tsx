@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { GameState } from '../types/game';
 import { UPGRADES } from '../data/upgrades';
-import { SKINS, Skin, getSkinMilestoneProgress } from '../data/skins';
+import { SKINS, Skin, getSkinMilestoneProgress, equipSkin } from '../data/skins';
 import { ACHIEVEMENTS } from '../data/achievements';
 import { PRESTIGE_UPGRADES, PRESTIGE_REQUIREMENT, calculatePrestigeShards } from '../data/prestige';
 import { getUpgradeCost, getBulkUpgradeCost, getMaxAffordableUpgrade, calculateCPS } from '../utils/calculations';
+import { saveGame } from '../utils/storage';
 import { formatCoins, formatNumber } from '../utils/formatters';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
@@ -105,32 +106,18 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState, onOpenS
     soundManager.playBuy();
   };
 
-  // --- SKIN UNLOCK & EQUIP (100% Milestone-based, ZERO coin cost) ---
+  // --- SKIN EQUIP (Authoritatively validated - only unlocked skins can be equipped) ---
   const currentCps = calculateCPS(state);
 
   const handleEquipSkin = (skin: Skin) => {
-    if (state.unlockedSkins.includes(skin.id)) {
-      // Already unlocked, equip it for free
-      setState((prev) => ({ ...prev, equippedSkin: skin.id }));
-      soundManager.playBuy();
-      return;
-    }
-
-    // Check milestone requirement
-    const progress = getSkinMilestoneProgress(skin, state, currentCps);
-    if (!progress.isMet) return;
-
-    // Zero coin cost!
-    setState((prev) => ({
-      ...prev,
-      unlockedSkins: prev.unlockedSkins.includes(skin.id)
-        ? prev.unlockedSkins
-        : [...prev.unlockedSkins, skin.id],
-      equippedSkin: skin.id,
-    }));
-
-    soundManager.playSkinUnlock();
-    particleEngine.emitPrestige();
+    setState((prev) => {
+      const next = equipSkin(prev, skin.id);
+      if (next !== prev) {
+        saveGame(next);
+        soundManager.playBuy();
+      }
+      return next;
+    });
   };
 
   // --- REBIRTH ---

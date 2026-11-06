@@ -262,6 +262,7 @@ export const SKINS: Skin[] = [
 ];
 
 export function getTotalUpgradesPurchased(upgrades: Record<string, number>): number {
+  if (!upgrades || typeof upgrades !== 'object') return 0;
   return Object.values(upgrades).reduce((sum, lvl) => sum + (lvl || 0), 0);
 }
 
@@ -287,11 +288,11 @@ export function getSkinMilestoneProgress(
     case 'free':
       return { current: 0, target: 0, percent: 100, isMet: true, progressLabel: 'Unlocked' };
     case 'clicks':
-      current = state.clicks;
+      current = typeof state.clicks === 'number' ? state.clicks : 0;
       progressLabel = `${current.toLocaleString()} / ${target.toLocaleString()} Clicks`;
       break;
     case 'lifetime_coins':
-      current = state.lifetimeCoins;
+      current = typeof state.lifetimeCoins === 'number' ? state.lifetimeCoins : 0;
       progressLabel = `${Math.floor(current).toLocaleString()} / ${target.toLocaleString()} Coins`;
       break;
     case 'upgrades':
@@ -299,19 +300,19 @@ export function getSkinMilestoneProgress(
       progressLabel = `${current} / ${target} Upgrades`;
       break;
     case 'cps':
-      current = currentCps;
+      current = typeof currentCps === 'number' ? currentCps : 0;
       progressLabel = `${Math.floor(current).toLocaleString()} / ${target.toLocaleString()} CPS`;
       break;
     case 'achievements':
-      current = state.unlockedAchievements.length;
+      current = Array.isArray(state.unlockedAchievements) ? state.unlockedAchievements.length : 0;
       progressLabel = `${current} / ${target} Achievements`;
       break;
     case 'rebirth':
-      current = state.prestigeCount;
+      current = typeof state.prestigeCount === 'number' ? state.prestigeCount : 0;
       progressLabel = `${current} / ${target} Rebirths`;
       break;
     case 'skins_unlocked':
-      current = state.unlockedSkins.length;
+      current = Array.isArray(state.unlockedSkins) ? state.unlockedSkins.length : 0;
       progressLabel = `${current} / ${target} Forms`;
       break;
   }
@@ -326,4 +327,93 @@ export function getSkinMilestoneProgress(
     isMet,
     progressLabel,
   };
+}
+
+/**
+ * Checks whether a skin ID exists in the game database.
+ */
+export function isValidSkinId(skinId: string): boolean {
+  return Boolean(skinId) && SKINS.some((s) => s.id === skinId);
+}
+
+/**
+ * Checks whether a skin is in the player's unlocked collection.
+ */
+export function isSkinUnlocked(state: GameState, skinId: string): boolean {
+  return Boolean(state.unlockedSkins && state.unlockedSkins.includes(skinId));
+}
+
+/**
+ * Checks whether a skin can be equipped (must exist and be unlocked).
+ */
+export function canEquipSkin(state: GameState, skinId: string): boolean {
+  return isValidSkinId(skinId) && isSkinUnlocked(state, skinId);
+}
+
+/**
+ * Authoritative function for equipping a skin.
+ * Verifies that the requested skin exists and is present in the player's unlocked-skin collection.
+ * If the skin is locked, missing, or invalid, the request is REJECTED without modifying state.
+ */
+export function equipSkin(state: GameState, skinId: string): GameState {
+  if (!canEquipSkin(state, skinId)) {
+    return state;
+  }
+
+  if (state.equippedSkin === skinId) {
+    return state;
+  }
+
+  return {
+    ...state,
+    equippedSkin: skinId,
+  };
+}
+
+/**
+ * Evaluates milestone progress for all locked skins against the player's progress.
+ * Unlocks eligible skins without spending coins, records the unlock, and deterministically
+ * equips the highest newly earned skin through the authoritative equipSkin().
+ * Handles cascading unlocks (e.g. Rainbow Matthew unlocking when total unlocked forms reaches 12).
+ */
+export function checkAndApplyMilestoneUnlocks(
+  currentState: GameState,
+  currentCps: number,
+  autoEquip = true
+): { state: GameState; newlyUnlocked: Skin[] } {
+  let state = { ...currentState };
+  const newlyUnlocked: Skin[] = [];
+
+  // Loop to handle cascading milestones
+  let foundNew = true;
+  while (foundNew) {
+    foundNew = false;
+    for (const skin of SKINS) {
+      if (!state.unlockedSkins.includes(skin.id)) {
+        const progress = getSkinMilestoneProgress(skin, state, currentCps);
+        if (progress.isMet) {
+          // 1. Record the unlock first
+          state = {
+            ...state,
+            unlockedSkins: [...state.unlockedSkins, skin.id],
+          };
+          newlyUnlocked.push(skin);
+          foundNew = true;
+        }
+      }
+    }
+  }
+
+  // 2. If new skins were earned and autoEquip is requested, deterministically equip the highest newly earned skin
+  if (autoEquip && newlyUnlocked.length > 0) {
+    const highestNewlyUnlocked = [...SKINS]
+      .reverse()
+      .find((s) => newlyUnlocked.some((u) => u.id === s.id));
+
+    if (highestNewlyUnlocked) {
+      state = equipSkin(state, highestNewlyUnlocked.id);
+    }
+  }
+
+  return { state, newlyUnlocked };
 }
