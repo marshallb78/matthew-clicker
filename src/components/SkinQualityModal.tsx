@@ -192,3 +192,4 @@ export const SkinQualityModal: React.FC<SkinQualityModalProps> = ({
     </div>
   );
 };
+

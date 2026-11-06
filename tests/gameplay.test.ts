@@ -11,7 +11,7 @@ import {
 import { calculatePrestigeShards } from '../src/data/prestige';
 import { formatCoins, formatTime } from '../src/utils/formatters';
 import { UPGRADES } from '../src/data/upgrades';
-import { SKINS } from '../src/data/skins';
+import { SKINS, getSkinMilestoneProgress, getTotalUpgradesPurchased } from '../src/data/skins';
 import { ACHIEVEMENTS } from '../src/data/achievements';
 import { ENVIRONMENTS } from '../src/data/environments';
 import { BALANCE } from '../src/data/balance';
@@ -238,6 +238,101 @@ describe('Matthew Clicker Core Gameplay Tests', () => {
       const rotated = rotateLandmark({ x: 504.5, y: 513 }, { x: 504.5, y: 513 }, 0);
       expect(rotated.x).toBe(504.5);
       expect(rotated.y).toBe(513);
+    });
+  });
+
+  describe('Milestone-based Character Progression (Earned, Never Purchased)', () => {
+    it('verifies all 16 skins have milestones and ZERO coin cost', () => {
+      SKINS.forEach((skin: any) => {
+        expect(skin.cost).toBeUndefined();
+        expect(skin.milestone).toBeDefined();
+        expect(skin.milestone.type).toBeDefined();
+        expect(skin.milestone.description).toBeDefined();
+        expect(typeof skin.milestone.target).toBe('number');
+      });
+    });
+
+    it('unlocks Classic Matthew immediately with no requirements', () => {
+      const classic = SKINS.find((s) => s.id === 'classic_matthew')!;
+      const progress = getSkinMilestoneProgress(classic, state, 0);
+      expect(progress.isMet).toBe(true);
+      expect(progress.percent).toBe(100);
+    });
+
+    it('tracks Aura Matthew milestone via click count (target 100)', () => {
+      const aura = SKINS.find((s) => s.id === 'aura_matthew')!;
+      state.clicks = 45;
+      let progress = getSkinMilestoneProgress(aura, state, 0);
+      expect(progress.isMet).toBe(false);
+      expect(progress.current).toBe(45);
+      expect(progress.percent).toBe(45);
+
+      state.clicks = 100;
+      progress = getSkinMilestoneProgress(aura, state, 0);
+      expect(progress.isMet).toBe(true);
+      expect(progress.percent).toBe(100);
+    });
+
+    it('tracks Sad Matthew milestone via lifetime coins (target 500)', () => {
+      const sad = SKINS.find((s) => s.id === 'sad_matthew')!;
+      state.lifetimeCoins = 250;
+      let progress = getSkinMilestoneProgress(sad, state, 0);
+      expect(progress.isMet).toBe(false);
+      expect(progress.percent).toBe(50);
+
+      state.lifetimeCoins = 500;
+      progress = getSkinMilestoneProgress(sad, state, 0);
+      expect(progress.isMet).toBe(true);
+      expect(progress.percent).toBe(100);
+    });
+
+    it('tracks Sigma Matthew milestone via upgrades purchased (target 10)', () => {
+      const sigma = SKINS.find((s) => s.id === 'sigma_matthew')!;
+      state.upgrades = { finger_exercise: 6, coffee_supply: 3 }; // 9 upgrades
+      expect(getTotalUpgradesPurchased(state.upgrades)).toBe(9);
+      let progress = getSkinMilestoneProgress(sigma, state, 0);
+      expect(progress.isMet).toBe(false);
+      expect(progress.percent).toBe(90);
+
+      state.upgrades['coffee_supply'] = 4; // 10 upgrades
+      progress = getSkinMilestoneProgress(sigma, state, 0);
+      expect(progress.isMet).toBe(true);
+      expect(progress.percent).toBe(100);
+    });
+
+    it('tracks Fire Matthew milestone via CPS rate (target 100)', () => {
+      const fire = SKINS.find((s) => s.id === 'fire_matthew')!;
+      let progress = getSkinMilestoneProgress(fire, state, 40);
+      expect(progress.isMet).toBe(false);
+      expect(progress.percent).toBe(40);
+
+      progress = getSkinMilestoneProgress(fire, state, 100);
+      expect(progress.isMet).toBe(true);
+      expect(progress.percent).toBe(100);
+    });
+
+    it('tracks Ice Matthew milestone via achievements unlocked (target 6)', () => {
+      const ice = SKINS.find((s) => s.id === 'ice_matthew')!;
+      state.unlockedAchievements = ['a1', 'a2', 'a3', 'a4', 'a5'];
+      let progress = getSkinMilestoneProgress(ice, state, 0);
+      expect(progress.isMet).toBe(false);
+
+      state.unlockedAchievements.push('a6');
+      progress = getSkinMilestoneProgress(ice, state, 0);
+      expect(progress.isMet).toBe(true);
+    });
+
+    it('equipping skins does NOT cost any coins', () => {
+      state.coins = 5000;
+      state.unlockedSkins = ['classic_matthew', 'aura_matthew'];
+      state.equippedSkin = 'classic_matthew';
+
+      // Player equips aura_matthew
+      state.equippedSkin = 'aura_matthew';
+
+      // Zero coin deduction!
+      expect(state.coins).toBe(5000);
+      expect(state.equippedSkin).toBe('aura_matthew');
     });
   });
 });

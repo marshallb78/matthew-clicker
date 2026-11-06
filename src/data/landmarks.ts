@@ -84,3 +84,4 @@ export function rotateLandmark(pt: Point2D, origin: Point2D, angleRad: number): 
     y: origin.y + dx * sin + dy * cos,
   };
 }
+

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GameState, FloatingNumber } from '../types/game';
-import { SKINS } from '../data/skins';
+import { SKINS, getSkinMilestoneProgress } from '../data/skins';
 import { ENVIRONMENTS } from '../data/environments';
 import { formatCoins } from '../utils/formatters';
 import { calculateClickPower, calculateCPS } from '../utils/calculations';
@@ -107,8 +107,8 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   };
 
   // --- MILESTONE PROGRESS TRACKING ---
-  // Determine next worthwhile unlock goal (Next skin or next environment)
-  const nextLockedSkin = SKINS.find((s) => !state.unlockedSkins.includes(s.id) && s.cost > 0);
+  // Determine next worthwhile unlock goal (Next milestone skin or next environment)
+  const nextLockedSkin = SKINS.find((s) => !state.unlockedSkins.includes(s.id));
   const nextLockedEnv = ENVIRONMENTS.find(
     (e) => e.unlockCoins && state.lifetimeCoins < e.unlockCoins
   );
@@ -117,20 +117,22 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   let nextGoalTarget = 1;
   let nextGoalCurrent = 1;
   let nextGoalIcon = '👑';
+  let goalPercent = 100;
 
-  if (nextLockedSkin && (!nextLockedEnv || nextLockedSkin.cost <= (nextLockedEnv.unlockCoins || Infinity))) {
+  if (nextLockedSkin) {
+    const skinProgress = getSkinMilestoneProgress(nextLockedSkin, state, cps);
     nextGoalTitle = nextLockedSkin.name;
-    nextGoalTarget = nextLockedSkin.cost;
-    nextGoalCurrent = state.coins;
+    nextGoalTarget = skinProgress.target;
+    nextGoalCurrent = skinProgress.current;
+    goalPercent = skinProgress.percent;
     nextGoalIcon = '✨';
   } else if (nextLockedEnv && nextLockedEnv.unlockCoins) {
     nextGoalTitle = nextLockedEnv.name;
     nextGoalTarget = nextLockedEnv.unlockCoins;
     nextGoalCurrent = state.lifetimeCoins;
+    goalPercent = Math.min(100, Math.floor((nextGoalCurrent / nextGoalTarget) * 100));
     nextGoalIcon = nextLockedEnv.icon;
   }
-
-  const goalPercent = Math.min(100, Math.floor((nextGoalCurrent / nextGoalTarget) * 100));
 
   return (
     <div className="relative flex-1 flex flex-col items-center justify-between h-full p-4 select-none overflow-hidden">
@@ -216,7 +218,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
           className={`relative cursor-pointer transition-transform duration-75 select-none ${
             isSquashing ? 'animate-squash' : 'hover:scale-[1.03] active:scale-95'
           }`}
-          style={{ WebkitTapHighlightColor: 'transparent' }}
+          style={{ WebkitTapHighlightColor: 'transparent', transformOrigin: '49.3% 50.1%' }}
         >
           <div className="relative w-60 h-60 sm:w-80 sm:h-80 md:w-96 md:h-96 max-w-[85vw] max-h-[50vh] flex items-center justify-center">
             <img

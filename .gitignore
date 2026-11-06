@@ -34,3 +34,14 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# AI Model weights & Local Generation Cache
+ai/models/
+ai/output/
+ai/backups/
+*.safetensors
+*.ckpt
+*.pt
+*.bin
+*.onnx
+
+

@@ -632,3 +632,4 @@ def generate_all_premium_skins():
 
 if __name__ == "__main__":
     generate_all_premium_skins()
+

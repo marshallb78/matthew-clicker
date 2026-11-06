@@ -1,0 +1,162 @@
+{
+  "classic_matthew": {
+    "name": "Classic Matthew",
+    "rarity": "Common",
+    "theme": "Natural baseline",
+    "prompt": "authentic portrait photo of Matthew, clear warm natural indoor lighting, soft shadows, genuine skin texture, neutral relaxed pleasant expression, casual everyday wear, 8k uhd, photorealistic",
+    "negative_prompt": "cartoon, 3d render, anime, plastic, airbrushed, oversaturated, deformed eyes, extra limbs, bad anatomy",
+    "lighting": "Soft natural key light, 5500K warm fill",
+    "materials": "Natural cotton fabric, realistic skin specular",
+    "accessories": []
+  },
+  "aura_matthew": {
+    "name": "Aura Matthew",
+    "rarity": "Rare",
+    "theme": "Electric-blue energy",
+    "prompt": "photorealistic portrait of Matthew surrounded by intense crackling electric-blue energy aura, bright cyan neon plasma arcs, dramatic cool rim lighting tracing jawline and hair, luminous floating sparks, high voltage, hyperdetailed",
+    "negative_prompt": "cartoon, 3d render, drawing, blurry, low resolution, bad skin, altered facial structure",
+    "lighting": "Dual-tone rim light, electric cyan neon edge glow (#00d2ff)",
+    "materials": "Plasma energy fields, electric discharge particles",
+    "accessories": ["electric_aura", "cyan_rim_light"]
+  },
+  "sad_matthew": {
+    "name": "Sad Matthew",
+    "rarity": "Common",
+    "theme": "Melancholic tearful emotion",
+    "prompt": "photorealistic emotional portrait of Matthew looking heartbroken and mournful, natural tears welling and rolling from eyes down cheeks, red puffy lower eyelids, somber blue cinematic lighting, raindrops on window bokeh background",
+    "negative_prompt": "happy, smiling, exaggerated cartoon tears, plastic face, 3d render, low detail",
+    "lighting": "Moody low-key blue tones, subtle wet specular highlights on tears",
+    "materials": "Realistic liquid tear droplets, damp cheek skin",
+    "accessories": ["aligned_tears"]
+  },
+  "angry_matthew": {
+    "name": "Angry Matthew",
+    "rarity": "Common",
+    "theme": "Fuming rage and steam",
+    "prompt": "photorealistic intense portrait of Matthew with fiercely furrowed eyebrows, clenched jaw, intense focused glare, rising wisps of steam and heat distortion, fiery ember sparks, crimson and amber rim lighting, dramatic hard shadows",
+    "negative_prompt": "cartoon, goofy, 3d render, anime, soft, bad eyes, smiling",
+    "lighting": "Hard directional red and orange side light, high contrast key",
+    "materials": "Volumetric steam, heat haze distortion, fiery embers",
+    "accessories": ["steam_wisps", "crimson_rim_glow"]
+  },
+  "sigma_matthew": {
+    "name": "Sigma Matthew",
+    "rarity": "Rare",
+    "theme": "Dark sophistication & dark sunglasses",
+    "prompt": "photorealistic sharp stylish portrait of Matthew wearing luxury black designer sunglasses perfectly fitted to bridge of nose, sharp jawline, confident stoic expression, dark tailored charcoal blazer, neon noir city bokeh reflections in sunglasses lenses",
+    "negative_prompt": "cartoon, misplaced glasses, floating sunglasses, asymmetrical frames, 3d render, anime",
+    "lighting": "High-contrast rim lighting, cinematic teal and orange studio light",
+    "materials": "Polarized dark glass, matte black titanium frames, tailored wool",
+    "accessories": ["calibrated_sunglasses"]
+  },
+  "golden_matthew": {
+    "name": "Golden Matthew",
+    "rarity": "Legendary",
+    "theme": "Solid 24K gold luxury and golden crown",
+    "prompt": "photorealistic majestic portrait of Matthew crowned with a mastercrafted ornate solid 24k gold royal crown, warm gleaming golden metallic reflections on skin, gold leaf particles, imperial majestic lighting, ultra-luxurious baroque atmosphere",
+    "negative_prompt": "cartoon, yellow flat paint, plastic crown, crooked crown, 3d render, low resolution",
+    "lighting": "Radiant warm golden key light, specular metallic flare",
+    "materials": "Polished 24k gold, ruby and sapphire insets, golden glitter dust",
+    "accessories": ["calibrated_golden_crown", "gold_radiance"]
+  },
+  "diamond_matthew": {
+    "name": "Diamond Matthew",
+    "rarity": "Legendary",
+    "theme": "Faceted crystalline diamond refraction",
+    "prompt": "photorealistic celestial portrait of Matthew infused with brilliant crystalline diamond facets, prismatic rainbow caustics refracting across temples and cheekbones, sparkling gemstone dust, pristine icy blue lighting, flawless crystal clarity",
+    "negative_prompt": "cartoon, flat cyan, plastic, blurry facets, 3d render, deformed face",
+    "lighting": "High-index refraction caustics, crisp diamond specular flares",
+    "materials": "Brilliant-cut diamond facets, prismatic light rays",
+    "accessories": ["diamond_facets", "crystal_shimmer"]
+  },
+  "fire_matthew": {
+    "name": "Fire Matthew",
+    "rarity": "Epic",
+    "theme": "Roaring hellfire & embers",
+    "prompt": "photorealistic dramatic portrait of Matthew engulfed in realistic swirling inferno flames, blazing fire vortex surrounding head and shoulders, glowing orange-yellow fire reflections illuminating face, rising ash and hot coals, cinematic pyro effects",
+    "negative_prompt": "cartoon fire, flat illustration, painted flames, plastic, 3d render, distorted face",
+    "lighting": "Dynamic flickering fire illumination, deep warm 2000K flame light",
+    "materials": "Volumetric combustion, incandescent embers, smoke trails",
+    "accessories": ["fire_vortex", "flame_particles"]
+  },
+  "ice_matthew": {
+    "name": "Ice Matthew",
+    "rarity": "Epic",
+    "theme": "Sub-zero frost & icicles",
+    "prompt": "photorealistic frosty portrait of Matthew in sub-zero blizzard, delicate crystalline frost creeping on eyebrows and hair tips, icy breath mist, pale wintry skin with frozen crystal highlights, cold cyan and arctic white lighting, falling snowflakes",
+    "negative_prompt": "cartoon, blue paint, plastic icicles, 3d render, anime, melted ice",
+    "lighting": "Cold arctic daylight, 9000K rim lighting with specular frost glints",
+    "materials": "Hexagonal ice crystals, translucent frost frostbite, vapor mist",
+    "accessories": ["frost_veil", "eyebrow_frost", "ice_particles"]
+  },
+  "galaxy_matthew": {
+    "name": "Galaxy Matthew",
+    "rarity": "Mythic",
+    "theme": "Deep-space cosmic nebula & stellar rings",
+    "prompt": "photorealistic awe-inspiring portrait of Matthew gazing out into deep space, cosmic nebula with magenta and violet dust clouds swirling around silhouette, brilliant stars and constellations glowing in hair, delicate planetary rings encircling head",
+    "negative_prompt": "cartoon, flat space texture, low res stars, 3d render, distorted eyes",
+    "lighting": "Bioluminescent cosmic glow, deep violet and stellar blue illumination",
+    "materials": "Interstellar gas dust, luminous stars, planetary orbital rings",
+    "accessories": ["nebula_halo", "cosmic_stars", "planetary_rings"]
+  },
+  "evil_matthew": {
+    "name": "Evil Matthew",
+    "rarity": "Epic",
+    "theme": "Menacing shadows & obsidian horns",
+    "prompt": "photorealistic dark villainous portrait of Matthew with sleek obsidian demon horns curving gracefully from temples, glowing crimson irises, menacing subtle smirk, sinister deep crimson shadows, dark smoke tendrils, gothic cinematic aesthetic",
+    "negative_prompt": "cartoon, plastic horns, misplaced horns, goofy, 3d render, unrecognizable face",
+    "lighting": "Sinister under-lighting, deep crimson fill, heavy gothic shadows",
+    "materials": "Polished obsidian horn keratin, crimson iris glow, dark vapor",
+    "accessories": ["calibrated_obsidian_horns", "crimson_eye_glow"]
+  },
+  "sleepy_matthew": {
+    "name": "Sleepy Matthew",
+    "rarity": "Common",
+    "theme": "Cozy nighttime & striped nightcap",
+    "prompt": "photorealistic cozy portrait of Matthew looking drowsy and sleepy, heavy relaxed eyelids, wearing a charming classic striped knit nightcap tilted gently to side, soft warm candlelight, subtle floating Zzz dream motes, comfortable flannel pajamas",
+    "negative_prompt": "cartoon, wide awake, floating hat, plastic texture, 3d render, harsh lighting",
+    "lighting": "Soft warm 2700K bedside lamp glow, gentle dreamlike falloff",
+    "materials": "Soft knit wool yarn, cozy cotton flannel, warm fabric weave",
+    "accessories": ["calibrated_nightcap", "dream_bubbles"]
+  },
+  "rich_matthew": {
+    "name": "Rich Matthew",
+    "rarity": "Epic",
+    "theme": "Aristocratic luxury, top hat & gold monocle",
+    "prompt": "photorealistic opulent portrait of Matthew styled as an extravagant billionaire, wearing a sleek silk black top hat with silk ribbon and a calibrated golden monocle over right eye with delicate gold chain, tailored tuxedo with velvet lapels, champagne bokeh",
+    "negative_prompt": "cartoon, floating monocle, crooked top hat, 3d render, cheap costume",
+    "lighting": "Warm upscale ballroom chandelier lighting, golden specular rim",
+    "materials": "Beaver silk top hat, brass and 18k gold chain, optical glass lens",
+    "accessories": ["calibrated_top_hat", "calibrated_golden_monocle"]
+  },
+  "glitch_matthew": {
+    "name": "Glitch Matthew",
+    "rarity": "Mythic",
+    "theme": "Digital cyber matrix & RGB separation",
+    "prompt": "photorealistic cyberpunk portrait of Matthew experiencing digital reality glitch, sharp holographic scanlines, deliberate chromatic aberration RGB channel displacement around silhouette, glowing cyan and magenta cybernetic data streams, coherent facial features",
+    "negative_prompt": "unrecognizable face, destroyed eyes, muddy mess, cartoon, 3d render",
+    "lighting": "Dual cyan/magenta cyberpunk neon lighting, glowing terminal phosphors",
+    "materials": "Holographic grid lines, digital pixel artifacts, chromatic fringes",
+    "accessories": ["rgb_chromatic_split", "cyber_scanlines", "matrix_data"]
+  },
+  "rainbow_matthew": {
+    "name": "Rainbow Matthew",
+    "rarity": "Mythic",
+    "theme": "Prismatic spectrum energy & iridescent aura",
+    "prompt": "photorealistic vibrant portrait of Matthew illuminated by radiant continuous rainbow prism light spectrum, iridescent chromatic sheen across hair and cheeks, flowing rainbow energy ribbons, sparkling multi-colored light flares, joyful luminous atmosphere",
+    "negative_prompt": "clown makeup, muddy colors, cartoon rainbow, plastic, 3d render",
+    "lighting": "Continuous spectral rainbow dispersion, prismatic caustics",
+    "materials": "Iridescent optical film, prismatic rainbow dispersion rays",
+    "accessories": ["spectral_rainbow_aura", "prismatic_flares"]
+  },
+  "god_matthew": {
+    "name": "God Matthew",
+    "rarity": "Divine",
+    "theme": "Transcendent deity with sacred sun halo",
+    "prompt": "photorealistic awe-inspiring portrait of God Matthew in transcendent divine ascension, magnificent radiant golden solar halo emanating sacred geometric rays behind head, eyes glowing with serene celestial wisdom, golden god rays piercing clouds, majestic divine atmosphere",
+    "negative_prompt": "cartoon, plain yellow circle, flat illustration, 3d render, anime, ordinary face",
+    "lighting": "Omnipresent golden divine backlight, volumetric crepuscular god rays",
+    "materials": "Sacred celestial light, golden aura filaments, radiant starlight",
+    "accessories": ["sacred_sun_halo", "divine_god_rays", "celestial_aura"]
+  }
+}

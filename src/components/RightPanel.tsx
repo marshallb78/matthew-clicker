@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { GameState } from '../types/game';
 import { UPGRADES } from '../data/upgrades';
-import { SKINS, Skin } from '../data/skins';
+import { SKINS, Skin, getSkinMilestoneProgress } from '../data/skins';
 import { ACHIEVEMENTS } from '../data/achievements';
 import { PRESTIGE_UPGRADES, PRESTIGE_REQUIREMENT, calculatePrestigeShards } from '../data/prestige';
-import { getUpgradeCost, getBulkUpgradeCost, getMaxAffordableUpgrade } from '../utils/calculations';
+import { getUpgradeCost, getBulkUpgradeCost, getMaxAffordableUpgrade, calculateCPS } from '../utils/calculations';
 import { formatCoins, formatNumber } from '../utils/formatters';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
@@ -105,28 +105,28 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState, onOpenS
     soundManager.playBuy();
   };
 
-  // --- SKIN UNLOCK & EQUIP ---
-  const handleUnlockSkin = (skin: Skin) => {
+  // --- SKIN UNLOCK & EQUIP (100% Milestone-based, ZERO coin cost) ---
+  const currentCps = calculateCPS(state);
+
+  const handleEquipSkin = (skin: Skin) => {
     if (state.unlockedSkins.includes(skin.id)) {
-      // Already unlocked, equip it
+      // Already unlocked, equip it for free
       setState((prev) => ({ ...prev, equippedSkin: skin.id }));
       soundManager.playBuy();
       return;
     }
 
-    // Check rebirth requirement
-    if (skin.rebirthRequired && state.prestigeCount < skin.rebirthRequired) {
-      return;
-    }
+    // Check milestone requirement
+    const progress = getSkinMilestoneProgress(skin, state, currentCps);
+    if (!progress.isMet) return;
 
-    // Check coin cost
-    if (state.coins < skin.cost) return;
-
+    // Zero coin cost!
     setState((prev) => ({
       ...prev,
-      coins: prev.coins - skin.cost,
-      unlockedSkins: [...prev.unlockedSkins, skin.id],
-      equippedSkin: skin.id, // auto equip on purchase
+      unlockedSkins: prev.unlockedSkins.includes(skin.id)
+        ? prev.unlockedSkins
+        : [...prev.unlockedSkins, skin.id],
+      equippedSkin: skin.id,
     }));
 
     soundManager.playSkinUnlock();
@@ -377,83 +377,103 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState, onOpenS
               </div>
             )}
 
-            {/* LIST: MATTHEWS (SKINS) */}
+            {/* LIST: MATTHEWS (SKINS) - 100% MILESTONE-BASED EARNED FORMS */}
             {upgradeSubTab === 'skins' && (
               <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+                <div className="p-2 rounded-xl bg-slate-900/60 border border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
+                  <span>Matthew Forms are <strong className="text-amber-400">earned</strong> through milestones, never purchased!</span>
+                  <span className="font-bold text-cyan-400">{state.unlockedSkins.length} / {SKINS.length} Unlocked</span>
+                </div>
+
                 {SKINS.map((skin) => {
                   const isUnlocked = state.unlockedSkins.includes(skin.id);
                   const isEquipped = state.equippedSkin === skin.id;
-
-                  let canUnlock = false;
-                  let requirementText = '';
-
-                  if (skin.rebirthRequired) {
-                    canUnlock = state.prestigeCount >= skin.rebirthRequired;
-                    requirementText = `Rebirth ${skin.rebirthRequired}`;
-                  } else {
-                    canUnlock = state.coins >= skin.cost;
-                    requirementText = `${formatCoins(skin.cost)} Coins`;
-                  }
+                  const progress = getSkinMilestoneProgress(skin, state, currentCps);
 
                   return (
                     <div
                       key={skin.id}
-                      className={`flex items-center justify-between p-2.5 rounded-2xl border-2 transition-all ${
+                      className={`flex flex-col p-3 rounded-2xl border-2 transition-all ${
                         isEquipped
                           ? 'bg-[#1b254b] border-cyan-400 shadow-md shadow-cyan-500/20'
                           : isUnlocked
                           ? 'bg-[#1a2038] border-slate-700/80 hover:border-slate-600'
-                          : 'bg-[#111526] border-slate-850 opacity-70'
+                          : 'bg-[#111526] border-slate-850 opacity-80'
                       }`}
                     >
-                      {/* PORTRAIT & INFO */}
-                      <div className="flex items-center gap-2.5 flex-1 pr-2">
-                        <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-750 flex items-center justify-center p-1 overflow-hidden relative">
-                          <img
-                            src={skin.image}
-                            alt={skin.name}
-                            className={`w-full h-full object-contain ${!isUnlocked ? 'filter grayscale brightness-50' : ''}`}
-                          />
-                          {!isUnlocked && (
-                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                              <Lock className="w-4 h-4 text-slate-400" />
+                      <div className="flex items-center justify-between gap-2.5">
+                        {/* PORTRAIT & INFO */}
+                        <div className="flex items-center gap-2.5 flex-1 pr-2">
+                          <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-750 flex items-center justify-center p-1 overflow-hidden relative shrink-0">
+                            <img
+                              src={skin.image}
+                              alt={skin.name}
+                              className={`w-full h-full object-contain ${!isUnlocked ? 'filter grayscale brightness-50' : ''}`}
+                            />
+                            {!isUnlocked && (
+                              <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                <Lock className="w-4 h-4 text-slate-400" />
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-black text-sm text-slate-100 truncate">{skin.name}</span>
+                              <span className={`text-[9px] font-black px-1.5 py-0.2 rounded uppercase ${
+                                skin.rarity === 'Divine' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' :
+                                skin.rarity === 'Mythic' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40' :
+                                skin.rarity === 'Legendary' ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/40' :
+                                skin.rarity === 'Epic' ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40' :
+                                skin.rarity === 'Rare' ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40' :
+                                'bg-slate-700/50 text-slate-300 border border-slate-600'
+                              }`}>
+                                {skin.rarity}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span className="text-[10px] font-bold text-amber-300">{skin.perkDescription}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* ACTION BUTTON */}
+                        <div className="shrink-0">
+                          {isEquipped ? (
+                            <div className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-green-500/20 border border-green-500/40 text-green-300 font-black text-xs">
+                              <Check className="w-3.5 h-3.5 stroke-[3]" />
+                              Equipped
+                            </div>
+                          ) : isUnlocked ? (
+                            <button
+                              onClick={() => handleEquipSkin(skin)}
+                              className="px-3.5 py-1.5 rounded-xl font-black text-xs bg-cyan-500 hover:bg-cyan-400 text-slate-950 btn-chunky cursor-pointer transition shadow-md shadow-cyan-500/20"
+                            >
+                              Equip
+                            </button>
+                          ) : (
+                            <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-400 font-extrabold text-[11px]">
+                              <Lock className="w-3 h-3 text-slate-500" />
+                              <span>{progress.percent}%</span>
                             </div>
                           )}
                         </div>
-
-                        <div>
-                          <span className="font-black text-sm text-slate-100">{skin.name}</span>
-                          <div className="flex items-center gap-1 mt-0.5">
-                            <span className="text-[10px] font-bold text-amber-300">{skin.perkDescription}</span>
-                          </div>
-                        </div>
                       </div>
 
-                      {/* ACTION BUTTON */}
-                      {isEquipped ? (
-                        <div className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-green-500/20 border border-green-500/40 text-green-300 font-black text-xs">
-                          <Check className="w-3.5 h-3.5 stroke-[3]" />
-                          Equipped
+                      {/* PROGRESS BAR FOR LOCKED SKINS */}
+                      {!isUnlocked && (
+                        <div className="mt-2 pt-2 border-t border-slate-800/80">
+                          <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 mb-1">
+                            <span className="text-slate-300">Goal: {skin.milestone.description}</span>
+                            <span className="font-mono text-cyan-400">{progress.progressLabel}</span>
+                          </div>
+                          <div className="w-full h-1.5 rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-blue-400 transition-all duration-300"
+                              style={{ width: `${progress.percent}%` }}
+                            />
+                          </div>
                         </div>
-                      ) : isUnlocked ? (
-                        <button
-                          onClick={() => handleUnlockSkin(skin)}
-                          className="px-3.5 py-1.5 rounded-xl font-black text-xs bg-cyan-500 hover:bg-cyan-400 text-slate-950 btn-chunky cursor-pointer"
-                        >
-                          Equip
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => handleUnlockSkin(skin)}
-                          disabled={!canUnlock}
-                          className={`px-3 py-1.5 rounded-xl font-black text-xs btn-chunky ${
-                            canUnlock
-                              ? 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 border border-yellow-200 cursor-pointer'
-                              : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
-                          }`}
-                        >
-                          {requirementText}
-                        </button>
                       )}
                     </div>
                   );

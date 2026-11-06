@@ -1,5 +1,21 @@
 export type SkinRarity = 'Common' | 'Rare' | 'Epic' | 'Legendary' | 'Mythic' | 'Divine';
 
+export type MilestoneType =
+  | 'free'
+  | 'clicks'
+  | 'lifetime_coins'
+  | 'upgrades'
+  | 'cps'
+  | 'achievements'
+  | 'rebirth'
+  | 'skins_unlocked';
+
+export interface SkinMilestone {
+  type: MilestoneType;
+  target: number;
+  description: string;
+}
+
 export interface Skin {
   id: string;
   name: string;
@@ -7,8 +23,7 @@ export interface Skin {
   description: string;
   perkDescription: string;
   image: string;
-  cost: number;
-  rebirthRequired?: number;
+  milestone: SkinMilestone;
   clickBonusMultiplier: number;
   cpsBonusMultiplier: number;
   critBonusChance: number;

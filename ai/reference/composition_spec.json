@@ -1,0 +1,13 @@
+{
+  "canvas_width": 1024,
+  "canvas_height": 1024,
+  "face_anchor": {
+    "x": 504.5,
+    "y": 513
+  },
+  "head_width_approx": 480,
+  "head_height_approx": 520,
+  "camera_angle": "slight 3/4 front-facing tilt (-9.68 degrees)",
+  "background_convention": "transparent alpha channel (RGBA), cleanly isolated edges",
+  "in_game_transform_origin": "49.3% 50.1%"
+}

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { GameState } from '../types/game';
 import { calculateCPS } from '../utils/calculations';
 import { ACHIEVEMENTS } from '../data/achievements';
+import { SKINS, getSkinMilestoneProgress } from '../data/skins';
 import { saveGame } from '../utils/storage';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from '../components/ParticleCanvas';
@@ -55,11 +56,33 @@ export function useGameLoop({ state, setState, onNotify }: UseGameLoopProps) {
     return () => clearInterval(interval);
   }, [setState]);
 
-  // ACHIEVEMENT CHECKER (Every 1000ms)
+  // PROGRESSION CHECKER (Achievements & Milestone Skin Unlocks, Every 1000ms)
   useEffect(() => {
     const checker = setInterval(() => {
       const current = stateRef.current;
+      const currentCps = calculateCPS(current);
 
+      // 1. Check Skin Milestones (Characters Earned, Never Purchased!)
+      for (const skin of SKINS) {
+        if (!current.unlockedSkins.includes(skin.id)) {
+          const progress = getSkinMilestoneProgress(skin, current, currentCps);
+          if (progress.isMet) {
+            soundManager.playSkinUnlock();
+            particleEngine.emitPrestige();
+            onNotify(`NEW MATTHEW FORM EARNED!`, `${skin.name} unlocked! Milestone: ${skin.milestone.description}`);
+
+            setState((prev) => ({
+              ...prev,
+              unlockedSkins: prev.unlockedSkins.includes(skin.id)
+                ? prev.unlockedSkins
+                : [...prev.unlockedSkins, skin.id],
+            }));
+            return; // Trigger 1 notification per cycle to avoid notification stacking
+          }
+        }
+      }
+
+      // 2. Check Achievements
       for (const ach of ACHIEVEMENTS) {
         if (!current.unlockedAchievements.includes(ach.id)) {
           if (ach.condition(current)) {

@@ -84,6 +84,7 @@
 
 .animate-squash {
   animation: characterBounce 0.25s ease-out;
+  transform-origin: 49.3% 50.1%;
 }
 
 /* Custom Scrollbar */
