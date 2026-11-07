@@ -673,7 +673,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
                 draggable={false}
                 onError={() => {
                   const fallback =
-                    equippedSkin.fallbackImage || './assets/skins/existing/classic_matthew.svg';
+                    equippedSkin.fallbackImage || './images/skins/classic_matthew.png';
                   if (activeSpriteUrl !== fallback) {
                     setImgSrcOverride(fallback);
                   }
@@ -704,7 +704,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
               </>
             )}
             <img
-              src="./images/skins/tung_tung_sahur.png"
+              src="./images/skins/classic_matthew.png"
               alt="Giant Matthew"
               draggable={false}
               className="relative z-10 w-full h-full object-contain animate-bounce group-hover:scale-110 group-active:scale-90 transition-transform will-change-transform"

@@ -116,8 +116,8 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
           style={{ animationDuration: '4s' }}
         />
         <img
-          src="./images/skins/golden_matthew.png"
-          alt="Golden Matthew"
+          src="./images/skins/classic_matthew.png"
+          alt="Rare Matthew"
           className="relative w-20 h-20 object-contain drop-shadow-[0_0_16px_rgba(255,215,0,0.95)]"
         />
       </div>

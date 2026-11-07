@@ -75,7 +75,7 @@ export const SkinQualityModal: React.FC<SkinQualityModalProps> = ({
                       alt={skin.name}
                       onError={(e) => {
                         (e.currentTarget as HTMLImageElement).src =
-                          skin.fallbackImage || './assets/skins/existing/classic_matthew.svg';
+                          skin.fallbackImage || './images/skins/classic_matthew.png';
                       }}
                       className={`w-full h-full object-contain pointer-events-none drop-shadow-md ${
                         !isUnlocked ? 'filter grayscale brightness-50' : ''

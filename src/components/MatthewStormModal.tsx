@@ -271,7 +271,7 @@ export const MatthewStormModal: React.FC<MatthewStormModalProps> = ({
                           onError={(e) => {
                             (e.currentTarget as HTMLImageElement).src =
                               skin.fallbackImage ||
-                              './assets/skins/existing/classic_matthew.svg';
+                              './images/skins/classic_matthew.png';
                           }}
                           className="w-full h-full object-contain"
                         />
