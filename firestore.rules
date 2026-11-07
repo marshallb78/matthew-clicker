@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // 1. Public Global Schedule & Season Config (Read-Only for Clients)
+    match /config/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 2. Unique Username Registry:
+    // Anyone can check availability; only an authenticated user can claim an unclaimed username once.
+    match /usernames/{username} {
+      allow read: if true;
+      allow create: if isSignedIn()
+                    && !exists(/databases/$(database)/documents/usernames/$(username))
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.username is string
+                    && request.resource.data.username.size() >= 3
+                    && request.resource.data.username.size() <= 20;
+      allow update, delete: if false;
+    }
+
+    // 3. Permanent Player Profile (`users/{userId}`)
+    // Protected private profile: only the authenticated owner can read or write their own profile,
+    // and equippedSkin must be present in their unlockedSkins list.
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+                            && request.resource.data.gems is number
+                            && request.resource.data.gems >= 0
+                            && request.resource.data.unlockedSkins is list
+                            && request.resource.data.equippedSkin is string
+                            && request.resource.data.equippedSkin in request.resource.data.unlockedSkins;
+      allow delete: if false;
+
+      // 4. Seasonal Progression Subcollection (`users/{userId}/seasons/{seasonId}`)
+      match /seasons/{seasonId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+                              && request.resource.data.coins is number
+                              && request.resource.data.coins >= 0
+                              && request.resource.data.lifetimeCoins is number
+                              && request.resource.data.lifetimeCoins >= 0
+                              && request.resource.data.seasonalScore is number
+                              && request.resource.data.seasonalScore >= 0;
+        allow delete: if false;
+      }
+    }
+
+    // 5. Public Worldwide Seasonal Leaderboard (`leaderboards/{seasonId}/entries/{userId}`)
+    // Anyone can read rankings; only the owner can update their entry with a non-decreasing validated score.
+    match /leaderboards/{seasonId}/entries/{userId} {
+      allow read: if true;
+      allow create, update: if isOwner(userId)
+                            && request.resource.data.uid == userId
+                            && request.resource.data.username is string
+                            && request.resource.data.seasonalScore is number
+                            && request.resource.data.seasonalScore >= 0
+                            && (!resource.data.keys().hasAll(['seasonalScore'])
+                                || request.resource.data.seasonalScore >= resource.data.seasonalScore);
+      allow delete: if false;
+    }
+  }
+}
+

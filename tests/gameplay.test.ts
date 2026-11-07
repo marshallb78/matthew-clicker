@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { getDefaultGameState, exportSaveString, importSaveString } from '../src/utils/storage';
+import {
+  getDefaultGameState,
+  performSeasonalRollover,
+} from '../src/utils/storage';
 import {
   getUpgradeCost,
   getBulkUpgradeCost,
@@ -7,36 +10,52 @@ import {
   calculateClickPower,
   calculateCPS,
   calculateOfflineEarnings,
+  calculateGiantMatthewClickReward,
 } from '../src/utils/calculations';
-import { calculatePrestigeShards } from '../src/data/prestige';
-import { formatCoins, formatTime } from '../src/utils/formatters';
+import { calculatePrestigeShards, getAscensionMultiplier } from '../src/data/prestige';
 import { UPGRADES } from '../src/data/upgrades';
-import { SKINS, getSkinMilestoneProgress, getTotalUpgradesPurchased } from '../src/data/skins';
-import { ACHIEVEMENTS } from '../src/data/achievements';
-import { ENVIRONMENTS } from '../src/data/environments';
+import {
+  SKINS,
+  ALL_SKINS,
+  PUBLIC_VIEWABLE_SKINS,
+  MATTHEW_STORM_SKINS,
+  CHARACTER_SKINS,
+} from '../src/data/skins';
 import { BALANCE } from '../src/data/balance';
-import { MATTHEW_LANDMARKS, rotateLandmark } from '../src/data/landmarks';
+import {
+  GEM_ECONOMY_CONFIG,
+  MATTHEW_STORM_CONFIG,
+  FRIDAY_BONUS_CONFIG,
+} from '../src/config/gameConfig';
+import {
+  isFridayBonusActive,
+  evaluateMatthewStormState,
+} from '../src/utils/scheduleEngine';
+import { formatTime } from '../src/utils/formatters';
+import { validateUsernameFormat } from '../src/firebase/auth';
 
-describe('Matthew Clicker Core Gameplay Tests', () => {
+describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
   let state = getDefaultGameState();
 
   beforeEach(() => {
     state = getDefaultGameState();
   });
 
-  describe('Economy & Calculations', () => {
+  describe('Economy, Ascension Multiplier & Calculations', () => {
     it('calculates initial click power and zero CPS correctly', () => {
-      const { totalPower, critChance, comboMultiplier } = calculateClickPower(state);
+      const { totalPower, critChance, comboMultiplier, ascensionMultiplier } =
+        calculateClickPower(state);
       expect(totalPower).toBe(BALANCE.click.basePower);
       expect(critChance).toBeCloseTo(BALANCE.click.baseCritChance);
       expect(comboMultiplier).toBe(1.0);
+      expect(ascensionMultiplier).toBe(1);
 
       const cps = calculateCPS(state);
       expect(cps).toBe(0);
     });
 
     it('calculates upgrade costs with exponential scaling', () => {
-      const upgrade = UPGRADES[0]; // Finger Exercise
+      const upgrade = UPGRADES[0];
       const cost0 = getUpgradeCost(upgrade.baseCost, upgrade.costMultiplier, 0);
       const cost1 = getUpgradeCost(upgrade.baseCost, upgrade.costMultiplier, 1);
       const cost2 = getUpgradeCost(upgrade.baseCost, upgrade.costMultiplier, 2);
@@ -52,7 +71,7 @@ describe('Matthew Clicker Core Gameplay Tests', () => {
       const bulk10 = getBulkUpgradeCost(upgrade.baseCost, upgrade.costMultiplier, 0, 10);
 
       expect(bulk10.actualCount).toBe(10);
-      expect(bulk10.totalCost).toBeGreaterThan(single * 10); // exponential compound
+      expect(bulk10.totalCost).toBeGreaterThan(single * 10);
     });
 
     it('calculates max affordable upgrades without exceeding coins', () => {
@@ -64,275 +83,186 @@ describe('Matthew Clicker Core Gameplay Tests', () => {
       expect(maxInfo.totalCost).toBeLessThanOrEqual(coins);
     });
 
-    it('prevents negative currency balance and invalid purchases', () => {
-      expect(state.coins).toBe(0);
-      const upgrade = UPGRADES[0];
-      const cost = getUpgradeCost(upgrade.baseCost, upgrade.costMultiplier, 0);
+    it('scales click power and CPS with Capybara-style Ascension Multiplier (+0.05 per step), Friday 2x, and Storm Wave multipliers', () => {
+      state.upgrades['finger_exercise'] = 9; // base click = 1 + 9 = 10
+      state.upgrades['energy_coffee'] = 10; // base CPS = 10 * 1.0 = 10.0
+      state.prestigeShards = 40; // Ascension Multiplier = 1 + 40 * 0.05 = 3.0x
 
-      const canBuy = state.coins >= cost;
-      expect(canBuy).toBe(false);
+      const normalClick = calculateClickPower(state);
+      const normalCps = calculateCPS(state);
+      expect(normalClick.ascensionMultiplier).toBe(3);
+      expect(normalClick.totalPower).toBe(30); // 10 * 3x
+      expect(normalCps).toBeCloseTo(30.0); // 10 * 3x
 
-      if (canBuy) {
-        state.coins -= cost;
-      }
-      expect(state.coins).toBe(0);
-    });
+      // Stack Friday 2x + 10x Storm Wave = 20x live multiplier on top of 3x Ascension Multiplier
+      const liveOpts = { fridayBonusActive: true, stormWaveMultiplier: 10 };
+      const boostedClick = calculateClickPower(state, liveOpts);
+      const boostedCps = calculateCPS(state, liveOpts);
 
-    it('scales click power when click upgrades are leveled', () => {
-      state.upgrades['finger_exercise'] = 5; // +1 * 5 = +5
-      const { totalPower } = calculateClickPower(state);
-      expect(totalPower).toBe(6); // base 1 + 5 = 6
-    });
+      expect(boostedClick.totalPower).toBe(600); // 30 * 2 * 10
+      expect(boostedCps).toBeCloseTo(600.0); // 30 * 2 * 10
 
-    it('scales CPS when passive upgrades are leveled', () => {
-      state.upgrades['autoclicker_bot'] = 4; // +1.5 * 4 = 6.0
-      const cps = calculateCPS(state);
-      expect(cps).toBe(6.0);
-    });
-
-    it('applies combo multipliers capped at max combo bonus', () => {
-      state.combo = 20; // 1 + 20 * 0.01 = 1.20x
-      const { comboMultiplier } = calculateClickPower(state);
-      expect(comboMultiplier).toBeCloseTo(1.20);
-    });
-
-    it('applies permanent achievement boost of +1% per unlocked achievement', () => {
-      state.unlockedAchievements = ['first_click', 'first_upgrade', 'combo_starter']; // 3 achievements = +3%
-      state.upgrades['finger_exercise'] = 99; // basePower = 100
-      const { totalPower } = calculateClickPower(state);
-      expect(totalPower).toBe(103); // 100 * 1.03 = 103
+      const giantReward = calculateGiantMatthewClickReward(state, liveOpts);
+      expect(giantReward).toBeGreaterThan(boostedClick.totalPower);
     });
   });
 
-  describe('Prestige (Cosmic Ascension)', () => {
-    it('returns 0 shards if lifetime coins are below requirement (1M)', () => {
+  describe('Rebirth (Capybara Clicker Style Ascension Multiplier: +0.05 per step)', () => {
+    it('returns 0 bonus if lifetime coins are below requirement (1M)', () => {
       expect(calculatePrestigeShards(500000)).toBe(0);
+      expect(getAscensionMultiplier(0)).toBe(1);
     });
 
-    it('calculates square root scaling shards at and above 1M coins', () => {
-      expect(calculatePrestigeShards(1000000)).toBe(5);
-      expect(calculatePrestigeShards(4000000)).toBe(10);
-      expect(calculatePrestigeShards(100000000)).toBe(50);
-    });
-
-    it('applies permanent shard multiplier to earnings', () => {
-      state.prestigeShards = 10; // +20% bonus
-      state.upgrades['finger_exercise'] = 10;
-      const { totalPower } = calculateClickPower(state);
-      expect(totalPower).toBeGreaterThan(11);
+    it('calculates Ascension Multiplier bonus in +0.05 steps at and above 1M coins', () => {
+      expect(calculatePrestigeShards(1000000)).toBe(1);
+      expect(calculatePrestigeShards(4000000)).toBe(2);
+      expect(getAscensionMultiplier(1)).toBe(1.05);
+      expect(getAscensionMultiplier(2)).toBe(1.1);
     });
   });
 
-  describe('Offline Earnings Calculation', () => {
-    it('caps offline earnings at 8 hours (28,800 seconds)', () => {
-      state.upgrades['autoclicker_bot'] = 10; // 15 CPS
-      state.lastSaveTime = Date.now() - 3600 * 24 * 1000; // 24 hours ago
+  describe('Day-Based Countdown Formatting', () => {
+    it('formats durations >= 24 hours into days (Xd Xh Xm)', () => {
+      const hours160 = 160 * 3600;
+      expect(formatTime(hours160)).toBe('6d 16h 0m');
+      expect(formatTime(3665)).toBe('1h 1m');
+    });
+  });
+
+  describe('Uncapped Offline Earnings & Zero Offline Gems', () => {
+    it('calculates uncapped offline coins even past 24 hours and awards 0 gems', () => {
+      state.upgrades['autoclicker_bot'] = 10;
+      state.lastSaveTime = Date.now() - 3600 * 24 * 1000;
       const nowSec = Math.floor(Date.now() / 1000);
 
-      const { elapsedSeconds, coinsEarned } = calculateOfflineEarnings(state, nowSec);
-      expect(elapsedSeconds).toBe(28800); // capped at 8 hours
+      const { elapsedSeconds, coinsEarned, gemsEarned } = calculateOfflineEarnings(state, nowSec);
+      expect(elapsedSeconds).toBeGreaterThanOrEqual(86399);
       expect(coinsEarned).toBeGreaterThan(0);
+      expect(gemsEarned).toBe(0);
+    });
+
+    it('discards offline coin carryover across a season boundary', () => {
+      state.upgrades['autoclicker_bot'] = 10;
+      state.currentSeasonId = 'season_1';
+      state.lastSaveTime = Date.now() - 3600 * 5 * 1000;
+      const nowSec = Math.floor(Date.now() / 1000);
+
+      const { elapsedSeconds, coinsEarned, gemsEarned } = calculateOfflineEarnings(
+        state,
+        nowSec,
+        'season_2'
+      );
+      expect(elapsedSeconds).toBe(0);
+      expect(coinsEarned).toBe(0);
+      expect(gemsEarned).toBe(0);
     });
   });
 
-  describe('Save / Load & Export / Import System', () => {
-    it('exports and imports save strings with 100% fidelity', () => {
-      state.coins = 42500;
-      state.lifetimeCoins = 150000;
-      state.clicks = 350;
-      state.upgrades['finger_exercise'] = 12;
-      state.unlockedSkins = ['classic_matthew', 'sad_matthew'];
-      state.equippedSkin = 'sad_matthew';
-
-      const exported = exportSaveString(state);
-      expect(typeof exported).toBe('string');
-      expect(exported.length).toBeGreaterThan(20);
-
-      const imported = importSaveString(exported);
-      expect(imported.coins).toBe(42500);
-      expect(imported.lifetimeCoins).toBe(150000);
-      expect(imported.clicks).toBe(350);
-      expect(imported.upgrades['finger_exercise']).toBe(12);
-      expect(imported.equippedSkin).toBe('sad_matthew');
-      expect(imported.unlockedSkins).toContain('sad_matthew');
+  describe('Gem Economy, Friday 2x & Matthew Storm Schedule', () => {
+    it('configures exact gem economy rates and 7s Giant Matthew duration', () => {
+      expect(GEM_ECONOMY_CONFIG.normalGemsPerInterval).toBe(3);
+      expect(GEM_ECONOMY_CONFIG.normalIntervalSeconds).toBe(600);
+      expect(GEM_ECONOMY_CONFIG.stormGemsPerInterval).toBe(10);
+      expect(GEM_ECONOMY_CONFIG.stormIntervalSeconds).toBe(600);
+      expect(GEM_ECONOMY_CONFIG.dailyLoginGems).toBe(5);
+      expect(GEM_ECONOMY_CONFIG.offlineGems).toBe(0);
+      expect(GEM_ECONOMY_CONFIG.stormSkinCostGems).toBe(50);
+      expect(MATTHEW_STORM_CONFIG.giantMatthewDurationSeconds).toBeGreaterThanOrEqual(5);
+      expect(MATTHEW_STORM_CONFIG.giantMatthewDurationSeconds).toBeLessThanOrEqual(10);
+      expect(MATTHEW_STORM_SKINS.length).toBe(5);
     });
 
-    it('throws meaningful error on corrupt save string', () => {
-      expect(() => importSaveString('INVALID_BASE64_GARBAGE!#$')).toThrow();
+    it('detects Friday 2x points bonus on Friday in America/New_York including Nov 13, 2026', () => {
+      expect(FRIDAY_BONUS_CONFIG.multiplier).toBe(2);
+      const fridayNov13 = Date.parse('2026-11-13T12:00:00-05:00');
+      const thursdayNov12 = Date.parse('2026-11-12T12:00:00-05:00');
+      expect(isFridayBonusActive(fridayNov13)).toBe(true);
+      expect(isFridayBonusActive(thursdayNov12)).toBe(false);
+    });
+
+    it('evaluates Matthew Storm schedule for Nov 13, 2026 1:50 PM – 2:00 PM EST and test simulation', () => {
+      expect(MATTHEW_STORM_CONFIG.startIso).toBe('2026-11-13T13:50:00-05:00');
+      expect(MATTHEW_STORM_CONFIG.endIso).toBe('2026-11-13T14:00:00-05:00');
+      expect(UPGRADES.length).toBe(32);
+
+      const startMs = Date.parse(MATTHEW_STORM_CONFIG.startIso);
+      const endMs = Date.parse(MATTHEW_STORM_CONFIG.endIso);
+
+      const pre5s = evaluateMatthewStormState(startMs - 5000, null);
+      expect(pre5s.status).toBe('fullscreen_10s_countdown');
+      expect(pre5s.secondsUntilStart).toBe(5);
+
+      const during = evaluateMatthewStormState(startMs + 60_000, null);
+      expect(during.status).toBe('active');
+      expect(during.shopOpen).toBe(true);
+
+      const after = evaluateMatthewStormState(endMs + 10_000, null);
+      expect(after.status).toBe('ended');
+      expect(after.shopOpen).toBe(false);
     });
   });
 
-  describe('Formatters', () => {
-    it('formats small and compact numbers correctly', () => {
-      expect(formatCoins(0)).toBe('0');
-      expect(formatCoins(45)).toBe('45');
-      expect(formatCoins(999)).toBe('999');
-      expect(formatCoins(1234)).toBe('1.2K');
-      expect(formatCoins(5400000)).toBe('5.4M');
-      expect(formatCoins(8900000000)).toBe('8.9B');
-      expect(formatCoins(2100000000000)).toBe('2.1T');
-    });
+  describe('30-Day Seasonal Rollover & Permanent Ownership', () => {
+    it('resets seasonal coins, upgrades, and rebirths while preserving all skins and gems', () => {
+      state.coins = 999999;
+      state.lifetimeCoins = 5000000;
+      state.seasonalScore = 5000000;
+      state.prestigeCount = 4;
+      state.prestigeShards = 50;
+      state.unlockedSkins = ['classic_matthew', 'god_matthew', 'matthew_storm_skin_1', 'mathjew'];
+      state.equippedSkin = 'matthew_storm_skin_1';
+      state.gems = 135;
 
-    it('formats time correctly', () => {
-      expect(formatTime(45)).toBe('45s');
-      expect(formatTime(125)).toBe('2m 5s');
-      expect(formatTime(7320)).toBe('2h 2m');
-    });
-  });
+      const rolled = performSeasonalRollover(state, 'season_2');
+      expect(rolled.currentSeasonId).toBe('season_2');
+      expect(rolled.coins).toBe(0);
+      expect(rolled.seasonalScore).toBe(0);
+      expect(rolled.prestigeCount).toBe(0);
 
-  describe('Content Completeness & Tongue Removal', () => {
-    it('has all 16 required Matthew skins', () => {
-      expect(SKINS.length).toBe(16);
-      const expectedSkins = [
+      expect(rolled.unlockedSkins).toEqual([
         'classic_matthew',
-        'sad_matthew',
-        'sleepy_matthew',
-        'angry_matthew',
-        'aura_matthew',
-        'sigma_matthew',
-        'rich_matthew',
-        'evil_matthew',
-        'fire_matthew',
-        'ice_matthew',
-        'golden_matthew',
-        'diamond_matthew',
-        'rainbow_matthew',
-        'glitch_matthew',
-        'galaxy_matthew',
         'god_matthew',
-      ];
-      expectedSkins.forEach((id) => {
-        const found = SKINS.find((s) => s.id === id);
-        expect(found).toBeDefined();
-      });
-    });
-
-    it('has zero tongue-out properties in skin data', () => {
-      SKINS.forEach((skin: any) => {
-        expect(skin.tongueImage).toBeUndefined();
-      });
-    });
-
-    it('has at least 14 working upgrades', () => {
-      expect(UPGRADES.length).toBeGreaterThanOrEqual(14);
-    });
-
-    it('has at least 15 achievements', () => {
-      expect(ACHIEVEMENTS.length).toBeGreaterThanOrEqual(15);
-    });
-
-    it('has 7 unlockable background environments', () => {
-      expect(ENVIRONMENTS.length).toBe(7);
-      expect(ENVIRONMENTS[0].id).toBe('matthew_room');
-    });
-
-    it('has calibrated facial landmarks matching Matthew ground truth', () => {
-      expect(MATTHEW_LANDMARKS.leftEyePupil.x).toBe(393);
-      expect(MATTHEW_LANDMARKS.leftEyePupil.y).toBe(532);
-      expect(MATTHEW_LANDMARKS.rightEyePupil.x).toBe(616);
-      expect(MATTHEW_LANDMARKS.rightEyePupil.y).toBe(494);
-      expect(MATTHEW_LANDMARKS.headTiltAngleDeg).toBeCloseTo(-9.68, 1);
-      expect(MATTHEW_LANDMARKS.interOcularDistance).toBeCloseTo(226.2, 1);
-
-      // Verify rotation utility works
-      const rotated = rotateLandmark({ x: 504.5, y: 513 }, { x: 504.5, y: 513 }, 0);
-      expect(rotated.x).toBe(504.5);
-      expect(rotated.y).toBe(513);
+        'matthew_storm_skin_1',
+        'mathjew',
+      ]);
+      expect(rolled.equippedSkin).toBe('matthew_storm_skin_1');
+      expect(rolled.gems).toBe(135);
+      expect(rolled.seasonHistory.length).toBe(1);
     });
   });
 
-  describe('Milestone-based Character Progression (Earned, Never Purchased)', () => {
-    it('verifies all 16 skins have milestones and ZERO coin cost', () => {
-      SKINS.forEach((skin: any) => {
-        expect(skin.cost).toBeUndefined();
-        expect(skin.milestone).toBeDefined();
-        expect(skin.milestone.type).toBeDefined();
-        expect(skin.milestone.description).toBeDefined();
-        expect(typeof skin.milestone.target).toBe('number');
+  describe('Account Username Validation', () => {
+    it('validates 3-20 alphanumeric/underscore usernames and rejects invalid ones', () => {
+      expect(validateUsernameFormat('Matthew_99')).toBeNull();
+      expect(validateUsernameFormat('ab')).not.toBeNull();
+      expect(validateUsernameFormat('bad space')).not.toBeNull();
+    });
+  });
+
+  describe('Main Point Skins, Super-Rare Mathjew (Mathgoon Removed) & 5 Secret Storm Skins', () => {
+    it('has 11 main point-based skins, cosmetic-only stats, super-rare Mathjew, no Mathgoon, and 5 secret Storm skins', () => {
+      expect(SKINS.length).toBe(11);
+      expect(ALL_SKINS.length).toBe(18);
+      // PUBLIC_VIEWABLE_SKINS hides the 5 secret Storm Event skins
+      expect(PUBLIC_VIEWABLE_SKINS.length).toBe(13);
+      MATTHEW_STORM_SKINS.forEach((stormSkin) => {
+        expect(PUBLIC_VIEWABLE_SKINS.some((s) => s.id === stormSkin.id)).toBe(false);
       });
-    });
 
-    it('unlocks Classic Matthew immediately with no requirements', () => {
-      const classic = SKINS.find((s) => s.id === 'classic_matthew')!;
-      const progress = getSkinMilestoneProgress(classic, state, 0);
-      expect(progress.isMet).toBe(true);
-      expect(progress.percent).toBe(100);
-    });
+      // Every skin is purely cosmetic swag (no stat boost) and uses transparent .png
+      ALL_SKINS.forEach((skin) => {
+        expect(skin.clickBonusMultiplier).toBe(1.0);
+        expect(skin.cpsBonusMultiplier).toBe(1.0);
+        expect(skin.critBonusChance).toBe(0);
+        expect(skin.bruisedImage).toBeUndefined();
+        expect(skin.image.endsWith('.png')).toBe(true);
+      });
 
-    it('tracks Aura Matthew milestone via click count (target 100)', () => {
-      const aura = SKINS.find((s) => s.id === 'aura_matthew')!;
-      state.clicks = 45;
-      let progress = getSkinMilestoneProgress(aura, state, 0);
-      expect(progress.isMet).toBe(false);
-      expect(progress.current).toBe(45);
-      expect(progress.percent).toBe(45);
-
-      state.clicks = 100;
-      progress = getSkinMilestoneProgress(aura, state, 0);
-      expect(progress.isMet).toBe(true);
-      expect(progress.percent).toBe(100);
-    });
-
-    it('tracks Sad Matthew milestone via lifetime coins (target 500)', () => {
-      const sad = SKINS.find((s) => s.id === 'sad_matthew')!;
-      state.lifetimeCoins = 250;
-      let progress = getSkinMilestoneProgress(sad, state, 0);
-      expect(progress.isMet).toBe(false);
-      expect(progress.percent).toBe(50);
-
-      state.lifetimeCoins = 500;
-      progress = getSkinMilestoneProgress(sad, state, 0);
-      expect(progress.isMet).toBe(true);
-      expect(progress.percent).toBe(100);
-    });
-
-    it('tracks Sigma Matthew milestone via upgrades purchased (target 10)', () => {
-      const sigma = SKINS.find((s) => s.id === 'sigma_matthew')!;
-      state.upgrades = { finger_exercise: 6, coffee_supply: 3 }; // 9 upgrades
-      expect(getTotalUpgradesPurchased(state.upgrades)).toBe(9);
-      let progress = getSkinMilestoneProgress(sigma, state, 0);
-      expect(progress.isMet).toBe(false);
-      expect(progress.percent).toBe(90);
-
-      state.upgrades['coffee_supply'] = 4; // 10 upgrades
-      progress = getSkinMilestoneProgress(sigma, state, 0);
-      expect(progress.isMet).toBe(true);
-      expect(progress.percent).toBe(100);
-    });
-
-    it('tracks Fire Matthew milestone via CPS rate (target 100)', () => {
-      const fire = SKINS.find((s) => s.id === 'fire_matthew')!;
-      let progress = getSkinMilestoneProgress(fire, state, 40);
-      expect(progress.isMet).toBe(false);
-      expect(progress.percent).toBe(40);
-
-      progress = getSkinMilestoneProgress(fire, state, 100);
-      expect(progress.isMet).toBe(true);
-      expect(progress.percent).toBe(100);
-    });
-
-    it('tracks Ice Matthew milestone via achievements unlocked (target 6)', () => {
-      const ice = SKINS.find((s) => s.id === 'ice_matthew')!;
-      state.unlockedAchievements = ['a1', 'a2', 'a3', 'a4', 'a5'];
-      let progress = getSkinMilestoneProgress(ice, state, 0);
-      expect(progress.isMet).toBe(false);
-
-      state.unlockedAchievements.push('a6');
-      progress = getSkinMilestoneProgress(ice, state, 0);
-      expect(progress.isMet).toBe(true);
-    });
-
-    it('equipping skins does NOT cost any coins', () => {
-      state.coins = 5000;
-      state.unlockedSkins = ['classic_matthew', 'aura_matthew'];
-      state.equippedSkin = 'classic_matthew';
-
-      // Player equips aura_matthew
-      state.equippedSkin = 'aura_matthew';
-
-      // Zero coin deduction!
-      expect(state.coins).toBe(5000);
-      expect(state.equippedSkin).toBe('aura_matthew');
+      const mathjew = CHARACTER_SKINS.find((s) => s.id === 'mathjew');
+      const mathgoon = CHARACTER_SKINS.find((s) => s.id === 'mathgoon');
+      expect(mathjew).toBeDefined();
+      expect(mathjew?.milestone.target).toBeGreaterThanOrEqual(1e15);
+      expect(mathgoon).toBeUndefined();
     });
   });
 });

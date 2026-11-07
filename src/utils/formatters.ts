@@ -25,7 +25,7 @@ const SUFFIXES = [
   'ODc',
   'NDc',
   'Vg',
-  'Infinity'
+  'Infinity',
 ];
 
 export function formatCoins(val: number, precision: number = 1): string {
@@ -33,7 +33,6 @@ export function formatCoins(val: number, precision: number = 1): string {
   if (!isFinite(val)) return '∞';
 
   if (val < 1000) {
-    // Show one decimal if it's not a whole number and small, or just floor
     return val >= 10 ? Math.floor(val).toLocaleString() : (Math.round(val * 10) / 10).toString();
   }
 
@@ -51,12 +50,15 @@ export function formatNumber(val: number): string {
 }
 
 export function formatTime(seconds: number): string {
-  if (seconds < 60) return `${Math.floor(seconds)}s`;
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
+  const safeSec = Math.max(0, Math.floor(seconds));
+  if (safeSec < 60) return `${safeSec}s`;
+  const m = Math.floor(safeSec / 60);
+  const s = safeSec % 60;
   if (m < 60) return `${m}m ${s}s`;
   const h = Math.floor(m / 60);
   const remM = m % 60;
-  return `${h}h ${remM}m`;
+  if (h < 24) return `${h}h ${remM}m`;
+  const d = Math.floor(h / 24);
+  const remH = h % 24;
+  return `${d}d ${remH}h ${remM}m`;
 }
-

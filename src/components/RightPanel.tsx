@@ -1,72 +1,53 @@
 import React, { useState } from 'react';
 import { GameState } from '../types/game';
 import { UPGRADES } from '../data/upgrades';
-import { SKINS, Skin, getSkinMilestoneProgress, equipSkin } from '../data/skins';
-import { ACHIEVEMENTS } from '../data/achievements';
-import { PRESTIGE_UPGRADES, PRESTIGE_REQUIREMENT, calculatePrestigeShards } from '../data/prestige';
-import { getUpgradeCost, getBulkUpgradeCost, getMaxAffordableUpgrade, calculateCPS } from '../utils/calculations';
+import { ALL_SKINS, PUBLIC_VIEWABLE_SKINS, Skin, equipSkin } from '../data/skins';
+import { QUESTS, getQuestProgress } from '../data/quests';
+import {
+  PRESTIGE_REQUIREMENT,
+  calculatePrestigeShards,
+  getAscensionMultiplier,
+} from '../data/prestige';
+import {
+  getUpgradeCost,
+  getBulkUpgradeCost,
+  getMaxAffordableUpgrade,
+} from '../utils/calculations';
+import { getAuthoritativeDateString } from '../utils/scheduleEngine';
+import { GEM_ECONOMY_CONFIG } from '../config/gameConfig';
 import { saveGame } from '../utils/storage';
-import { formatCoins, formatNumber } from '../utils/formatters';
+import { formatCoins } from '../utils/formatters';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
+import { UpgradeArtwork } from './UpgradeArtwork';
 import {
   ShoppingBag,
   Infinity as InfinityIcon,
   Trophy,
   Check,
-  Lock,
-  Sparkles,
   Zap,
-  Mouse,
-  Keyboard,
-  Cpu,
-  Users,
-  Factory,
-  Dna,
-  Crown,
-  Orbit,
-  Atom,
-  BicepsFlexed,
-  Flame,
-  CheckCircle2,
-  Coffee,
-  Bot,
-  Mic,
-  Server,
-  Satellite,
+  Gem,
+  Gift,
+  Eye,
 } from 'lucide-react';
 
-export type RightTab = 'upgrades' | 'rebirth' | 'achievements';
+export type RightTab = 'upgrades' | 'rebirth' | 'quests';
 
 interface RightPanelProps {
   state: GameState;
   setState: React.Dispatch<React.SetStateAction<GameState>>;
   onOpenSkinQualityModal?: () => void;
+  onNotify?: (title: string, subtitle: string) => void;
 }
-
-const UPGRADE_ICONS: Record<string, React.ElementType> = {
-  BicepsFlexed,
-  Zap,
-  Coffee,
-  Bot,
-  Mouse,
-  Keyboard,
-  Mic,
-  Cpu,
-  Users,
-  Factory,
-  Dna,
-  Server,
-  Satellite,
-  Sparkles,
-  Crown,
-  Orbit,
-  Atom,
-};
 
 type BuyMode = 1 | 10 | 'MAX';
 
-export const RightPanel: React.FC<RightPanelProps> = ({ state, setState, onOpenSkinQualityModal }) => {
+export const RightPanel: React.FC<RightPanelProps> = ({
+  state,
+  setState,
+  onOpenSkinQualityModal,
+  onNotify,
+}) => {
   const [activeTab, setActiveTab] = useState<RightTab>('upgrades');
   const [upgradeSubTab, setUpgradeSubTab] = useState<'items' | 'skins'>('items');
   const [buyMode, setBuyMode] = useState<BuyMode>(1);
@@ -81,13 +62,23 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState, onOpenS
     let totalCost = 0;
 
     if (buyMode === 'MAX') {
-      const maxInfo = getMaxAffordableUpgrade(upgrade.baseCost, upgrade.costMultiplier, currentLevel, state.coins);
+      const maxInfo = getMaxAffordableUpgrade(
+        upgrade.baseCost,
+        upgrade.costMultiplier,
+        currentLevel,
+        state.coins
+      );
       if (maxInfo.count <= 0) return;
       countToBuy = maxInfo.count;
       totalCost = maxInfo.totalCost;
     } else {
       countToBuy = buyMode;
-      const bulkInfo = getBulkUpgradeCost(upgrade.baseCost, upgrade.costMultiplier, currentLevel, countToBuy);
+      const bulkInfo = getBulkUpgradeCost(
+        upgrade.baseCost,
+        upgrade.costMultiplier,
+        currentLevel,
+        countToBuy
+      );
       totalCost = bulkInfo.totalCost;
       if (state.coins < totalCost) return;
     }
@@ -97,6 +88,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState, onOpenS
     setState((prev) => ({
       ...prev,
       coins: prev.coins - totalCost,
+      lastActiveInputTimestamp: Date.now(),
       upgrades: {
         ...prev.upgrades,
         [upgradeId]: (prev.upgrades[upgradeId] || 0) + countToBuy,
@@ -107,8 +99,6 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState, onOpenS
   };
 
   // --- SKIN EQUIP (Authoritatively validated - only unlocked skins can be equipped) ---
-  const currentCps = calculateCPS(state);
-
   const handleEquipSkin = (skin: Skin) => {
     setState((prev) => {
       const next = equipSkin(prev, skin.id);
@@ -120,10 +110,13 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState, onOpenS
     });
   };
 
-  // --- REBIRTH ---
-  const potentialShards = calculatePrestigeShards(state.lifetimeCoins);
-  const shardsToGain = Math.max(0, potentialShards - state.lifetimePrestigeShards);
-  const canRebirth = state.lifetimeCoins >= PRESTIGE_REQUIREMENT && shardsToGain > 0;
+  // --- REBIRTH (CAPYBARA CLICKER STYLE ASCENSION MULTIPLIER: +0.05× PER STEP) ---
+  const currentAscensionMult = getAscensionMultiplier(state.prestigeShards);
+  const potentialBonus = calculatePrestigeShards(state.lifetimeCoins);
+  const multGain = Math.max(0, potentialBonus - state.lifetimePrestigeShards);
+  const nextAscensionMult = getAscensionMultiplier(state.prestigeShards + multGain);
+  const multDeltaDisplay = (nextAscensionMult - currentAscensionMult).toFixed(2);
+  const canRebirth = state.lifetimeCoins >= PRESTIGE_REQUIREMENT && multGain > 0;
 
   const handleRebirth = () => {
     if (!canRebirth) return;
@@ -131,48 +124,103 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState, onOpenS
     soundManager.playPrestige();
     particleEngine.emitPrestige();
 
-    setState((prev) => ({
-      ...prev,
-      coins: 0,
-      upgrades: {},
-      combo: 0,
-      comboTimer: 0,
-      frenzyTimer: 0,
-      prestigeCount: prev.prestigeCount + 1,
-      prestigeShards: prev.prestigeShards + shardsToGain,
-      lifetimePrestigeShards: prev.lifetimePrestigeShards + shardsToGain,
-    }));
+    setState((prev) => {
+      const next: GameState = {
+        ...prev,
+        coins: 0,
+        upgrades: {},
+        combo: 0,
+        comboTimer: 0,
+        frenzyTimer: 0,
+        prestigeCount: prev.prestigeCount + 1,
+        prestigeShards: prev.prestigeShards + multGain,
+        lifetimePrestigeShards: prev.lifetimePrestigeShards + multGain,
+        lastActiveInputTimestamp: Date.now(),
+      };
+      saveGame(next);
+      return next;
+    });
+
+    if (onNotify) {
+      onNotify(
+        'ASCENSION COMPLETE!',
+        `Your global Ascension Multiplier is now ${nextAscensionMult.toFixed(2)}×!`
+      );
+    }
   };
 
-  const handleBuyPerk = (perkId: string) => {
-    const perk = PRESTIGE_UPGRADES.find((p) => p.id === perkId);
-    if (!perk) return;
+  // --- DAILY LOGIN BONUS (+5 Gems once per day) ---
+  const todayDateStr = getAuthoritativeDateString();
+  const canClaimDailyLogin = state.lastDailyLoginClaimDate !== todayDateStr;
 
-    const currentLevel = state.prestigeUpgrades[perkId] || 0;
-    if (currentLevel >= perk.maxLevel) return;
+  const handleClaimDailyLogin = () => {
+    if (!canClaimDailyLogin) return;
+    soundManager.playBuy();
+    particleEngine.emitPrestige();
 
-    const cost = Math.floor(perk.baseCost * Math.pow(perk.costMultiplier, currentLevel));
-    if (state.prestigeShards < cost) return;
+    setState((prev) => {
+      const bonus = GEM_ECONOMY_CONFIG.dailyLoginGems;
+      const next: GameState = {
+        ...prev,
+        gems: prev.gems + bonus,
+        lifetimeGems: prev.lifetimeGems + bonus,
+        lastDailyLoginClaimDate: todayDateStr,
+        lastActiveInputTimestamp: Date.now(),
+      };
+      saveGame(next);
+      return next;
+    });
 
-    setState((prev) => ({
-      ...prev,
-      prestigeShards: prev.prestigeShards - cost,
-      prestigeUpgrades: {
-        ...prev.prestigeUpgrades,
-        [perkId]: (prev.prestigeUpgrades[perkId] || 0) + 1,
-      },
-    }));
+    if (onNotify) {
+      onNotify(
+        'DAILY LOGIN CLAIMED!',
+        `+${GEM_ECONOMY_CONFIG.dailyLoginGems} Gems added to your permanent vault!`
+      );
+    }
+  };
+
+  // --- QUEST CLAIM ---
+  const handleClaimQuest = (questId: string) => {
+    const quest = QUESTS.find((q) => q.id === questId);
+    if (!quest || state.claimedQuests.includes(questId)) return;
+
+    const progress = getQuestProgress(quest, state);
+    if (!progress.isComplete) return;
 
     soundManager.playBuy();
+    particleEngine.emitPrestige();
+
+    setState((prev) => {
+      const next: GameState = {
+        ...prev,
+        claimedQuests: [...prev.claimedQuests, questId],
+        coins: prev.coins + (quest.rewardCoins || 0),
+        lifetimeCoins: prev.lifetimeCoins + (quest.rewardCoins || 0),
+        seasonalScore: prev.seasonalScore + (quest.rewardCoins || 0),
+        gems: prev.gems + (quest.rewardGems || 0),
+        lifetimeGems: prev.lifetimeGems + (quest.rewardGems || 0),
+        lastActiveInputTimestamp: Date.now(),
+      };
+      saveGame(next);
+      return next;
+    });
+
+    if (onNotify) {
+      onNotify('QUEST COMPLETE!', `${quest.title} (+${quest.rewardGems} Gems) claimed!`);
+    }
   };
+
+  const unlockedSkinsList = ALL_SKINS.filter((s) => state.unlockedSkins.includes(s.id));
+  const dailyQuests = QUESTS.filter((q) => q.scope === 'daily');
+  const seasonalQuests = QUESTS.filter((q) => q.scope === 'seasonal');
 
   return (
     <div className="flex h-full w-full bg-[#13172b]/95 border-l-2 border-slate-800/80 shadow-2xl backdrop-blur-md overflow-hidden font-chunky">
-      {/* VERTICAL SIDEBAR TABS (Along the side of the screen) */}
+      {/* VERTICAL SIDEBAR TABS (SHOP, REBIRTH, QUESTS) */}
       <div className="flex flex-col items-center py-3 px-1.5 bg-[#0a0d18] border-r-2 border-slate-800/80 gap-3 z-30 select-none">
         <button
           onClick={() => setActiveTab('upgrades')}
-          title="Upgrades & Matthews"
+          title="Upgrades & Unlocked Matthews"
           className={`w-12 h-12 rounded-2xl flex flex-col items-center justify-center transition-all cursor-pointer ${
             activeTab === 'upgrades'
               ? 'bg-amber-500 text-slate-950 font-black shadow-lg shadow-amber-500/30 scale-105'
@@ -185,7 +233,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState, onOpenS
 
         <button
           onClick={() => setActiveTab('rebirth')}
-          title="Rebirth (Cosmic Ascension)"
+          title="Rebirth (Ascension Multiplier)"
           className={`w-12 h-12 rounded-2xl flex flex-col items-center justify-center transition-all cursor-pointer ${
             activeTab === 'rebirth'
               ? 'bg-purple-600 text-white font-black shadow-lg shadow-purple-600/30 scale-105'
@@ -197,31 +245,32 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState, onOpenS
         </button>
 
         <button
-          onClick={() => setActiveTab('achievements')}
-          title="Achievements"
-          className={`w-12 h-12 rounded-2xl flex flex-col items-center justify-center transition-all cursor-pointer ${
-            activeTab === 'achievements'
+          onClick={() => setActiveTab('quests')}
+          title="Daily & Season Quests"
+          className={`relative w-12 h-12 rounded-2xl flex flex-col items-center justify-center transition-all cursor-pointer ${
+            activeTab === 'quests'
               ? 'bg-yellow-400 text-slate-950 font-black shadow-lg shadow-yellow-400/30 scale-105'
               : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
           }`}
         >
           <Trophy className="w-5 h-5" />
-          <span className="text-[9px] font-bold mt-0.5">Badges</span>
+          <span className="text-[9px] font-bold mt-0.5">Quests</span>
+          {canClaimDailyLogin && (
+            <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-fuchsia-500 border border-white animate-ping" />
+          )}
         </button>
       </div>
 
       {/* PANEL CONTENT */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
-        {/* ================= UPGRADES TAB ================= */}
+        {/* ================= UPGRADES & MATTHEWS TAB ================= */}
         {activeTab === 'upgrades' && (
           <div className="flex flex-col h-full">
-            {/* SUB-TAB TOGGLE & BULK SELECTOR */}
             <div className="p-3 border-b border-slate-800/80 flex items-center justify-between gap-2 bg-[#101426]/80">
-              {/* Items vs Matthews Sub-tab */}
               <div className="flex items-center bg-slate-900 rounded-xl p-1 border border-slate-750">
                 <button
                   onClick={() => setUpgradeSubTab('items')}
-                  className={`px-3 py-1 text-xs font-black rounded-lg transition-all ${
+                  className={`px-3 py-1 text-xs font-black rounded-lg transition-all cursor-pointer ${
                     upgradeSubTab === 'items'
                       ? 'bg-amber-500 text-slate-950 shadow-sm'
                       : 'text-slate-400 hover:text-white'
@@ -231,28 +280,29 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState, onOpenS
                 </button>
                 <button
                   onClick={() => setUpgradeSubTab('skins')}
-                  className={`px-3 py-1 text-xs font-black rounded-lg transition-all flex items-center gap-1 ${
+                  className={`px-3 py-1 text-xs font-black rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
                     upgradeSubTab === 'skins'
                       ? 'bg-amber-500 text-slate-950 shadow-sm'
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
                   Matthews
-                  <span className="text-[10px] px-1 py-0.2 rounded-full bg-slate-950/40 font-bold">
-                    {state.unlockedSkins.length}/16
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-950/40 font-bold">
+                    {unlockedSkinsList.length}
                   </span>
                 </button>
               </div>
 
-              {/* Bulk Buy Toggle (only on items) */}
               {upgradeSubTab === 'items' && (
                 <div className="flex items-center bg-slate-900 rounded-xl p-1 border border-slate-750">
                   {([1, 10, 'MAX'] as BuyMode[]).map((mode) => (
                     <button
                       key={mode}
                       onClick={() => setBuyMode(mode)}
-                      className={`px-2 py-0.5 text-[11px] font-black rounded-md transition-all ${
-                        buyMode === mode ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                      className={`px-2 py-0.5 text-[11px] font-black rounded-md transition-all cursor-pointer ${
+                        buyMode === mode
+                          ? 'bg-cyan-500 text-slate-950'
+                          : 'text-slate-400 hover:text-white'
                       }`}
                     >
                       {mode === 'MAX' ? 'MAX' : `${mode}x`}
@@ -261,25 +311,22 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState, onOpenS
                 </div>
               )}
 
-              {/* Skins Quality Inspector Button */}
               {upgradeSubTab === 'skins' && onOpenSkinQualityModal && (
                 <button
                   onClick={onOpenSkinQualityModal}
-                  className="px-2.5 py-1 text-[11px] font-black rounded-xl bg-slate-900 border border-slate-750 text-amber-300 hover:text-white hover:border-amber-400 transition flex items-center gap-1 shadow-sm"
-                  title="Inspect all 16 skins side-by-side with calibrated landmarks"
+                  className="px-3 py-1.5 text-[11px] font-black rounded-xl bg-gradient-to-r from-amber-500/20 to-cyan-500/20 border border-amber-400/60 text-amber-300 hover:text-white hover:border-amber-300 transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  title="View all public skins in the game"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Inspect All 16</span>
+                  <Eye className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>View All Skins</span>
                 </button>
               )}
             </div>
 
-            {/* LIST: ITEMS */}
             {upgradeSubTab === 'items' && (
-              <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+              <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
                 {UPGRADES.map((upgrade) => {
                   const currentLevel = state.upgrades[upgrade.id] || 0;
-                  const IconComp = UPGRADE_ICONS[upgrade.icon] || Sparkles;
 
                   let cost = 0;
                   let countToDisplay = 1;
@@ -310,50 +357,78 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState, onOpenS
                     canAfford = state.coins >= cost;
                   }
 
+                  const affordProgressPct = Math.min(
+                    100,
+                    cost > 0 ? Math.floor((state.coins / cost) * 100) : 100
+                  );
+
                   return (
                     <div
                       key={upgrade.id}
                       onClick={() => canAfford && handleBuyUpgrade(upgrade.id)}
-                      className={`flex items-center justify-between p-2.5 rounded-2xl border-2 transition-all cursor-pointer ${
+                      className={`relative overflow-hidden flex items-center justify-between p-2.5 rounded-2xl border-2 transition-all select-none ${
                         canAfford
-                          ? 'bg-[#1a2038] border-amber-500/40 hover:border-amber-400 hover:bg-[#202744] active:scale-[0.98]'
-                          : 'bg-[#111526] border-slate-800/80 opacity-60 cursor-not-allowed'
+                          ? 'bg-gradient-to-r from-[#19203a] to-[#1f2849] border-amber-400/70 hover:border-yellow-300 hover:scale-[1.01] active:scale-[0.98] cursor-pointer shadow-lg shadow-amber-500/10'
+                          : 'bg-[#101424] border-slate-800/90 opacity-75 cursor-not-allowed'
                       }`}
                     >
-                      {/* ICON & NAME */}
-                      <div className="flex items-center gap-2.5 flex-1 pr-2">
+                      {/* Subtle Affordability Progress Fill Bar */}
+                      {!canAfford && affordProgressPct > 2 && (
                         <div
-                          className={`w-11 h-11 rounded-xl flex items-center justify-center p-2.5 ${
-                            canAfford ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800/60 text-slate-500'
-                          }`}
-                        >
-                          <IconComp className="w-full h-full" />
+                          className="absolute bottom-0 left-0 h-1 bg-gradient-to-r from-cyan-500/60 to-amber-400/60 transition-all duration-200"
+                          style={{ width: `${affordProgressPct}%` }}
+                        />
+                      )}
+
+                      <div className="flex items-center gap-3 flex-1 min-w-0 pr-2">
+                        {/* BIG VISUAL ILLUSTRATED ARTWORK TILE + FLOATING LEVEL BADGE */}
+                        <div className="relative shrink-0">
+                          <UpgradeArtwork
+                            iconKey={upgrade.icon}
+                            tier={upgrade.tier || 1}
+                            className={`w-14 h-14 transition-transform ${
+                              canAfford ? 'scale-100' : 'grayscale-[30%]'
+                            }`}
+                          />
+                          <span
+                            className={`absolute -bottom-1 -right-1 px-1.5 py-0.2 rounded-lg text-[10px] font-black border shadow ${
+                              currentLevel > 0
+                                ? 'bg-amber-400 text-slate-950 border-white'
+                                : 'bg-slate-900 text-slate-400 border-slate-700'
+                            }`}
+                          >
+                            Lv.{currentLevel}
+                          </span>
                         </div>
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-black text-sm text-slate-100">{upgrade.name}</span>
-                            <span className="text-[10px] font-black px-1.5 py-0.2 rounded bg-slate-900 text-cyan-400 border border-slate-750">
-                              Lvl {currentLevel}
-                            </span>
+
+                        {/* MINIMAL TEXT: BOLD TITLE + COMPACT STAT PILLS */}
+                        <div className="min-w-0 flex-1">
+                          <div className="font-black text-sm text-white truncate leading-tight">
+                            {upgrade.name}
                           </div>
-                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 mt-0.5">
+
+                          <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
                             {upgrade.baseClickPower > 0 && (
-                              <span className="text-cyan-400">+{formatCoins(upgrade.baseClickPower * countToDisplay)}/click</span>
+                              <span className="px-2 py-0.5 rounded-lg bg-cyan-500/15 border border-cyan-400/40 text-[11px] font-black text-cyan-300">
+                                +{formatCoins(upgrade.baseClickPower * countToDisplay)} Click
+                              </span>
                             )}
                             {upgrade.baseCps > 0 && (
-                              <span className="text-amber-400">+{formatCoins(upgrade.baseCps * countToDisplay)}/s</span>
+                              <span className="px-2 py-0.5 rounded-lg bg-amber-500/15 border border-amber-400/40 text-[11px] font-black text-amber-300">
+                                +{formatCoins(upgrade.baseCps * countToDisplay)}/s
+                              </span>
                             )}
                           </div>
                         </div>
                       </div>
 
-                      {/* PRICE BUTTON */}
+                      {/* CHUNKY BUY BUTTON */}
                       <button
                         disabled={!canAfford}
-                        className={`px-3 py-1.5 rounded-xl font-black text-xs min-w-[70px] btn-chunky ${
+                        className={`px-3.5 py-2.5 rounded-xl font-black text-xs min-w-[78px] btn-chunky shrink-0 transition-transform ${
                           canAfford
-                            ? 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 border border-yellow-200'
-                            : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                            ? 'bg-gradient-to-b from-yellow-300 via-amber-400 to-amber-500 text-slate-950 border-2 border-yellow-100 shadow-[0_0_16px_rgba(251,191,36,0.4)]'
+                            : 'bg-slate-800/90 text-slate-400 border border-slate-700 cursor-not-allowed'
                         }`}
                       >
                         {formatCoins(cost)}
@@ -364,234 +439,256 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState, onOpenS
               </div>
             )}
 
-            {/* LIST: MATTHEWS (SKINS) - 100% MILESTONE-BASED EARNED FORMS */}
+            {/* MATTHEWS SUB-TAB: ONLY IMAGES OF UNLOCKED SKINS */}
             {upgradeSubTab === 'skins' && (
-              <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-                <div className="p-2 rounded-xl bg-slate-900/60 border border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
-                  <span>Matthew Forms are <strong className="text-amber-400">earned</strong> through milestones, never purchased!</span>
-                  <span className="font-bold text-cyan-400">{state.unlockedSkins.length} / {SKINS.length} Unlocked</span>
+              <div className="flex-1 overflow-y-auto p-3">
+                <div className="grid grid-cols-3 gap-2.5">
+                  {unlockedSkinsList.map((skin) => {
+                    const isEquipped = state.equippedSkin === skin.id;
+                    return (
+                      <button
+                        key={skin.id}
+                        onClick={() => handleEquipSkin(skin)}
+                        title={skin.name}
+                        className={`relative aspect-square rounded-2xl p-2 bg-slate-950/90 border-2 flex items-center justify-center transition cursor-pointer hover:scale-105 active:scale-95 ${
+                          isEquipped
+                            ? 'border-amber-400 ring-2 ring-amber-400/50 shadow-[0_0_20px_rgba(251,191,36,0.35)]'
+                            : 'border-slate-800 hover:border-cyan-400/60'
+                        }`}
+                      >
+                        <img
+                          src={skin.image}
+                          alt={skin.name}
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).src =
+                              skin.fallbackImage || './assets/skins/existing/classic_matthew.svg';
+                          }}
+                          className="w-full h-full object-contain pointer-events-none drop-shadow-md"
+                        />
+                        {isEquipped && (
+                          <span className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-amber-400 text-slate-950 flex items-center justify-center shadow">
+                            <Check className="w-3.5 h-3.5 stroke-[3]" />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ================= REBIRTH TAB (CAPYBARA STYLE ASCENSION MULTIPLIER) ================= */}
+        {activeTab === 'rebirth' && (
+          <div className="flex-1 overflow-y-auto p-4 flex flex-col justify-center">
+            <div className="text-center p-5 rounded-3xl bg-slate-900/90 border-2 border-purple-500/40 shadow-xl">
+              <div className="w-16 h-16 rounded-full bg-purple-600/20 border-2 border-purple-400 p-3 mx-auto mb-3 flex items-center justify-center text-purple-300 shadow-[0_0_30px_rgba(168,85,247,0.4)]">
+                <InfinityIcon className="w-9 h-9" />
+              </div>
+              <h3 className="text-2xl font-black text-white uppercase tracking-wide">
+                Ascension Rebirth
+              </h3>
+              <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
+                Rebirthing resets your current coins and upgrades in exchange for a permanent{' '}
+                <strong className="text-yellow-300">Ascension Multiplier</strong> that multiplies{' '}
+                <strong className="text-cyan-300">EVERYTHING</strong> (all Click Power &amp; Coins
+                Per Second)! Your unlocked Matthew Skins and Gems never reset.
+              </p>
+
+              <div className="my-5 grid grid-cols-2 gap-3">
+                <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800">
+                  <span className="text-[10px] text-slate-400 uppercase font-black">
+                    Current Multiplier
+                  </span>
+                  <p className="text-2xl font-black text-purple-300 mt-1">
+                    {currentAscensionMult.toFixed(2)}×
+                  </p>
                 </div>
 
-                {SKINS.map((skin) => {
-                  const isUnlocked = state.unlockedSkins.includes(skin.id);
-                  const isEquipped = state.equippedSkin === skin.id;
-                  const progress = getSkinMilestoneProgress(skin, state, currentCps);
+                <div className="p-3.5 rounded-2xl bg-slate-950 border border-yellow-400/40">
+                  <span className="text-[10px] text-slate-400 uppercase font-black">
+                    After Rebirth
+                  </span>
+                  <p className="text-2xl font-black text-yellow-300 mt-1">
+                    {nextAscensionMult.toFixed(2)}×{' '}
+                    <span className="text-xs text-emerald-400">(+{multDeltaDisplay}×)</span>
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={handleRebirth}
+                disabled={!canRebirth}
+                className={`w-full py-3.5 rounded-2xl font-black text-sm uppercase tracking-wider btn-chunky transition ${
+                  canRebirth
+                    ? 'bg-gradient-to-r from-purple-600 via-fuchsia-500 to-amber-400 hover:brightness-110 text-slate-950 cursor-pointer shadow-lg shadow-purple-500/30'
+                    : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                }`}
+              >
+                {canRebirth
+                  ? `Rebirth Now → ${nextAscensionMult.toFixed(2)}× Ascension Multiplier`
+                  : `Requires 1M Lifetime Coins (${formatCoins(state.lifetimeCoins)} / 1M)`}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ================= QUESTS TAB (DAILY LOGIN, HARD DAILY QUESTS & HARD SEASON QUESTS) ================= */}
+        {activeTab === 'quests' && (
+          <div className="flex-1 overflow-y-auto p-3.5 space-y-4">
+            <div className="p-3.5 rounded-2xl bg-gradient-to-r from-fuchsia-950/80 via-purple-950/80 to-slate-900 border-2 border-fuchsia-500/50 shadow-lg">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-fuchsia-500/20 border border-fuchsia-400/50 flex items-center justify-center text-fuchsia-300">
+                    <Gift className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-white uppercase">Daily Login Bonus</h4>
+                    <p className="text-[11px] font-bold text-fuchsia-300">
+                      +{GEM_ECONOMY_CONFIG.dailyLoginGems} Permanent Gems every day!
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  disabled={!canClaimDailyLogin}
+                  onClick={handleClaimDailyLogin}
+                  className={`px-3 py-1.5 rounded-xl font-black text-xs transition ${
+                    canClaimDailyLogin
+                      ? 'bg-gradient-to-r from-fuchsia-500 to-pink-500 text-white shadow-md cursor-pointer hover:brightness-110'
+                      : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                  }`}
+                >
+                  {canClaimDailyLogin ? 'Claim +5 Gems' : 'Claimed Today'}
+                </button>
+              </div>
+            </div>
+
+            {/* DAILY QUESTS */}
+            <div>
+              <h3 className="text-sm font-black text-amber-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <Zap className="w-4 h-4 text-amber-400" />
+                <span>Daily Quests</span>
+              </h3>
+              <div className="space-y-2">
+                {dailyQuests.map((quest) => {
+                  const isClaimed = state.claimedQuests.includes(quest.id);
+                  const prog = getQuestProgress(quest, state);
 
                   return (
                     <div
-                      key={skin.id}
-                      className={`flex flex-col p-3 rounded-2xl border-2 transition-all ${
-                        isEquipped
-                          ? 'bg-[#1b254b] border-cyan-400 shadow-md shadow-cyan-500/20'
-                          : isUnlocked
-                          ? 'bg-[#1a2038] border-slate-700/80 hover:border-slate-600'
-                          : 'bg-[#111526] border-slate-850 opacity-80'
+                      key={quest.id}
+                      className={`p-3 rounded-2xl border ${
+                        isClaimed
+                          ? 'bg-slate-900/50 border-slate-800 opacity-60'
+                          : prog.isComplete
+                          ? 'bg-[#1a2442] border-amber-400'
+                          : 'bg-slate-900/90 border-slate-800'
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-2.5">
-                        {/* PORTRAIT & INFO */}
-                        <div className="flex items-center gap-2.5 flex-1 pr-2">
-                          <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-750 flex items-center justify-center p-1 overflow-hidden relative shrink-0">
-                            <img
-                              src={skin.image}
-                              alt={skin.name}
-                              className={`w-full h-full object-contain ${!isUnlocked ? 'filter grayscale brightness-50' : ''}`}
-                            />
-                            {!isUnlocked && (
-                              <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                                <Lock className="w-4 h-4 text-slate-400" />
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-black text-sm text-slate-100 truncate">{skin.name}</span>
-                              <span className={`text-[9px] font-black px-1.5 py-0.2 rounded uppercase ${
-                                skin.rarity === 'Divine' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' :
-                                skin.rarity === 'Mythic' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40' :
-                                skin.rarity === 'Legendary' ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/40' :
-                                skin.rarity === 'Epic' ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40' :
-                                skin.rarity === 'Rare' ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40' :
-                                'bg-slate-700/50 text-slate-300 border border-slate-600'
-                              }`}>
-                                {skin.rarity}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1 mt-0.5">
-                              <span className="text-[10px] font-bold text-amber-300">{skin.perkDescription}</span>
-                            </div>
-                          </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <span className="font-black text-xs text-white">{quest.title}</span>
+                          <p className="text-[10px] text-slate-400">{quest.description}</p>
+                          <p className="text-[10px] font-bold text-cyan-300 mt-0.5">
+                            Reward: +{quest.rewardGems} 💎 &amp; +{formatCoins(quest.rewardCoins || 0)} Coins
+                          </p>
                         </div>
 
-                        {/* ACTION BUTTON */}
-                        <div className="shrink-0">
-                          {isEquipped ? (
-                            <div className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-green-500/20 border border-green-500/40 text-green-300 font-black text-xs">
-                              <Check className="w-3.5 h-3.5 stroke-[3]" />
-                              Equipped
-                            </div>
-                          ) : isUnlocked ? (
-                            <button
-                              onClick={() => handleEquipSkin(skin)}
-                              className="px-3.5 py-1.5 rounded-xl font-black text-xs bg-cyan-500 hover:bg-cyan-400 text-slate-950 btn-chunky cursor-pointer transition shadow-md shadow-cyan-500/20"
-                            >
-                              Equip
-                            </button>
-                          ) : (
-                            <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-400 font-extrabold text-[11px]">
-                              <Lock className="w-3 h-3 text-slate-500" />
-                              <span>{progress.percent}%</span>
-                            </div>
-                          )}
-                        </div>
+                        {isClaimed ? (
+                          <span className="text-[10px] font-black text-emerald-400 flex items-center gap-1 shrink-0">
+                            <Check className="w-3.5 h-3.5" /> Claimed
+                          </span>
+                        ) : (
+                          <button
+                            disabled={!prog.isComplete}
+                            onClick={() => handleClaimQuest(quest.id)}
+                            className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition shrink-0 ${
+                              prog.isComplete
+                                ? 'bg-amber-400 text-slate-950 cursor-pointer shadow'
+                                : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                            }`}
+                          >
+                            {prog.isComplete ? `Claim (+${quest.rewardGems}💎)` : `${prog.percent}%`}
+                          </button>
+                        )}
                       </div>
-
-                      {/* PROGRESS BAR FOR LOCKED SKINS */}
-                      {!isUnlocked && (
-                        <div className="mt-2 pt-2 border-t border-slate-800/80">
-                          <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 mb-1">
-                            <span className="text-slate-300">Goal: {skin.milestone.description}</span>
-                            <span className="font-mono text-cyan-400">{progress.progressLabel}</span>
-                          </div>
-                          <div className="w-full h-1.5 rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
-                            <div
-                              className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-blue-400 transition-all duration-300"
-                              style={{ width: `${progress.percent}%` }}
-                            />
-                          </div>
+                      {!isClaimed && (
+                        <div className="w-full h-1.5 rounded-full bg-slate-950 mt-2 overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-amber-500 to-yellow-300 transition-all duration-300"
+                            style={{ width: `${prog.percent}%` }}
+                          />
                         </div>
                       )}
                     </div>
                   );
                 })}
               </div>
-            )}
-          </div>
-        )}
+            </div>
 
-        {/* ================= REBIRTH TAB ================= */}
-        {activeTab === 'rebirth' && (
-          <div className="flex-1 overflow-y-auto p-4 flex flex-col justify-between">
-            <div>
-              <div className="text-center pb-4 border-b border-slate-800">
-                <div className="w-14 h-14 rounded-full bg-purple-600/20 border-2 border-purple-500 p-2 mx-auto mb-2 flex items-center justify-center text-purple-400">
-                  <InfinityIcon className="w-8 h-8" />
-                </div>
-                <h3 className="text-xl font-black text-slate-100 font-chunky">Cosmic Rebirth</h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  Reset coins & upgrades for permanent <strong className="text-purple-400">Matthew Shards</strong> (+2%
-                  boost each)!
-                </p>
-
-                {/* STATS */}
-                <div className="my-4 p-3 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-around">
-                  <div>
-                    <span className="text-[10px] text-slate-400 uppercase font-black">Shards Available</span>
-                    <p className="text-lg font-black text-purple-300">{state.prestigeShards}</p>
-                  </div>
-                  <div className="h-6 w-[1px] bg-slate-800" />
-                  <div>
-                    <span className="text-[10px] text-slate-400 uppercase font-black">Gain on Rebirth</span>
-                    <p className="text-lg font-black text-yellow-300">+{shardsToGain}</p>
-                  </div>
-                </div>
-
-                <button
-                  onClick={handleRebirth}
-                  disabled={!canRebirth}
-                  className={`w-full py-3 rounded-2xl font-black text-sm uppercase tracking-wide btn-chunky ${
-                    canRebirth
-                      ? 'bg-gradient-to-r from-purple-600 to-pink-500 hover:brightness-110 text-white cursor-pointer'
-                      : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
-                  }`}
-                >
-                  {canRebirth ? `Rebirth Now (+${shardsToGain} Shards)` : `Requires 1M Coins (${formatCoins(state.lifetimeCoins)} / 1M)`}
-                </button>
-              </div>
-
-              {/* PERMANENT REBIRTH PERKS */}
-              <div className="mt-4 space-y-2 pb-6">
-                <h4 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-2">Permanent Perks</h4>
-                {PRESTIGE_UPGRADES.map((perk) => {
-                  const currentLevel = state.prestigeUpgrades[perk.id] || 0;
-                  const isMax = currentLevel >= perk.maxLevel;
-                  const cost = Math.floor(perk.baseCost * Math.pow(perk.costMultiplier, currentLevel));
-                  const canAfford = state.prestigeShards >= cost && !isMax;
+            {/* SEASON QUESTS */}
+            <div className="pb-6">
+              <h3 className="text-sm font-black text-cyan-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <Gem className="w-4 h-4 text-cyan-400" />
+                <span>Season Quests</span>
+              </h3>
+              <div className="space-y-2">
+                {seasonalQuests.map((quest) => {
+                  const isClaimed = state.claimedQuests.includes(quest.id);
+                  const prog = getQuestProgress(quest, state);
 
                   return (
                     <div
-                      key={perk.id}
-                      className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-slate-800"
+                      key={quest.id}
+                      className={`p-3 rounded-2xl border ${
+                        isClaimed
+                          ? 'bg-slate-900/50 border-slate-800 opacity-60'
+                          : prog.isComplete
+                          ? 'bg-[#1a2442] border-cyan-400'
+                          : 'bg-slate-900/90 border-slate-800'
+                      }`}
                     >
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-black text-xs text-slate-100">{perk.name}</span>
-                          <span className="text-[10px] text-purple-400 font-bold">
-                            {currentLevel}/{perk.maxLevel}
-                          </span>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <span className="font-black text-xs text-white">{quest.title}</span>
+                          <p className="text-[10px] text-slate-400">{quest.description}</p>
+                          <p className="text-[10px] font-bold text-fuchsia-300 mt-0.5">
+                            Reward: +{quest.rewardGems} 💎 &amp; +{formatCoins(quest.rewardCoins || 0)} Coins
+                          </p>
                         </div>
-                        <p className="text-[10px] text-slate-400">{perk.description}</p>
-                      </div>
 
-                      <button
-                        onClick={() => handleBuyPerk(perk.id)}
-                        disabled={!canAfford || isMax}
-                        className={`px-3 py-1 text-xs font-black rounded-lg ${
-                          isMax
-                            ? 'bg-slate-800 text-slate-500'
-                            : canAfford
-                            ? 'bg-purple-600 hover:bg-purple-500 text-white cursor-pointer'
-                            : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                        }`}
-                      >
-                        {isMax ? 'MAX' : `${cost} Shards`}
-                      </button>
+                        {isClaimed ? (
+                          <span className="text-[10px] font-black text-emerald-400 flex items-center gap-1 shrink-0">
+                            <Check className="w-3.5 h-3.5" /> Claimed
+                          </span>
+                        ) : (
+                          <button
+                            disabled={!prog.isComplete}
+                            onClick={() => handleClaimQuest(quest.id)}
+                            className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition shrink-0 ${
+                              prog.isComplete
+                                ? 'bg-cyan-400 text-slate-950 cursor-pointer shadow'
+                                : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                            }`}
+                          >
+                            {prog.isComplete ? `Claim (+${quest.rewardGems}💎)` : `${prog.percent}%`}
+                          </button>
+                        )}
+                      </div>
+                      {!isClaimed && (
+                        <div className="w-full h-1.5 rounded-full bg-slate-950 mt-2 overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-cyan-500 to-fuchsia-400 transition-all duration-300"
+                            style={{ width: `${prog.percent}%` }}
+                          />
+                        </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
-            </div>
-          </div>
-        )}
-
-        {/* ================= ACHIEVEMENTS TAB ================= */}
-        {activeTab === 'achievements' && (
-          <div className="flex-1 overflow-y-auto p-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
-              <div>
-                <h3 className="text-base font-black text-slate-100">Achievements</h3>
-                <span className="text-xs text-slate-400">
-                  {state.unlockedAchievements.length} / {ACHIEVEMENTS.length} unlocked
-                </span>
-              </div>
-            </div>
-
-            <div className="space-y-2 pb-6">
-              {ACHIEVEMENTS.map((ach) => {
-                const isUnlocked = state.unlockedAchievements.includes(ach.id);
-
-                return (
-                  <div
-                    key={ach.id}
-                    className={`flex items-center justify-between p-2.5 rounded-xl border ${
-                      isUnlocked
-                        ? 'bg-[#1a2038] border-yellow-500/40'
-                        : 'bg-slate-950/60 border-slate-850 opacity-50'
-                    }`}
-                  >
-                    <div>
-                      <span className="font-black text-xs text-slate-100">{ach.name}</span>
-                      <p className="text-[11px] text-slate-400">{ach.description}</p>
-                    </div>
-                    {isUnlocked ? (
-                      <CheckCircle2 className="w-5 h-5 text-yellow-400" />
-                    ) : (
-                      <Lock className="w-4 h-4 text-slate-600" />
-                    )}
-                  </div>
-                );
-              })}
             </div>
           </div>
         )}
@@ -599,4 +696,3 @@ export const RightPanel: React.FC<RightPanelProps> = ({ state, setState, onOpenS
     </div>
   );
 };
-

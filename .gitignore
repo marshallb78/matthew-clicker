@@ -38,6 +38,7 @@ pnpm-debug.log*
 ai/models/
 ai/output/
 ai/backups/
+/Images/
 *.safetensors
 *.ckpt
 *.pt
