@@ -151,9 +151,15 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
           fridayBonusActive,
           stormWaveMultiplier,
         });
+        const currCps = calculateCPS(s, {
+          fridayBonusActive,
+          stormWaveMultiplier,
+        });
+        // Balanced overdrive reward: 45 clicks + 20s of CPS (scales with production without exponential bank-doubling)
+        const prodBonus = currPower * 45 + currCps * 20;
         const bonusReward = Math.max(
-          500,
-          Math.floor(Math.max(s.coins * 0.75, s.lifetimeCoins * 0.15, currPower * 150))
+          50,
+          Math.floor(Math.max(prodBonus, Math.min(s.coins * 0.05, prodBonus * 2)))
         );
 
         soundManager.playSkinUnlock();

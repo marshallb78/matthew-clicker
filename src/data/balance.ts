@@ -21,14 +21,14 @@ export const BALANCE = {
 
   // --- GOLDEN MATTHEW BONUS EVENT ---
   goldenEvent: {
-    baseDelayMs: 80000, // Average 80 seconds between appearances
-    delayVarianceMs: 20000,
-    flightDurationMs: 12000, // 12 seconds on screen
+    baseDelayMs: 180000, // Average 3 minutes between appearances
+    delayVarianceMs: 45000,
+    flightDurationMs: 10000, // 10 seconds on screen
     frenzyDurationSec: 10,
-    frenzyMultiplier: 2.5, // 2.5x during frenzy
-    bountyCpsSeconds: 20, // awards 20 seconds of passive production
-    bountyClickCount: 15, // plus 15 clicks of power
-    minBountyFloor: 20, // Prevents early game inflation
+    frenzyMultiplier: 2.0, // 2.0x during frenzy
+    bountyCpsSeconds: 30, // awards 30 seconds of passive production
+    bountyClickCount: 25, // plus 25 clicks of power
+    minBountyFloor: 25, // Prevents early game inflation
   },
 
   // --- ACHIEVEMENTS ---

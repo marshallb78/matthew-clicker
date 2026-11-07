@@ -5,11 +5,24 @@ export const ASCENSION_STEP = 0.05; // +0.05x per Rebirth tier
 
 /**
  * Calculates how many +0.05x Ascension steps the player has earned from lifetime coins.
- * 1M coins -> 1 step (+0.05x), 4M coins -> 2 steps (+0.10x), 9M -> 3 steps (+0.15x).
+ * Uses a logarithmic diminishing-returns curve so early Rebirths feel rewarding
+ * (1M -> +0.05x, 2.6M -> +0.10x, 6.4M -> +0.15x, 16M -> +0.20x), while preventing
+ * multipliers from spiraling out of control in the Billions, Trillions, and Quadrillions
+ * (1B -> +0.40x, 1T -> +0.80x, 1Qa -> +1.15x).
  */
 export function calculatePrestigeShards(lifetimeCoins: number): number {
   if (lifetimeCoins < PRESTIGE_REQUIREMENT) return 0;
-  return Math.max(1, Math.floor(Math.sqrt(lifetimeCoins / PRESTIGE_REQUIREMENT)));
+  const logRatio = Math.log10(lifetimeCoins / PRESTIGE_REQUIREMENT);
+  return Math.max(1, 1 + Math.floor(logRatio * 2.5));
+}
+
+/**
+ * Returns the lifetime coins required to unlock the next +0.05x Ascension step.
+ */
+export function getNextPrestigeRequirement(currentLifetimeSteps: number): number {
+  const nextStep = Math.max(1, Math.floor(currentLifetimeSteps || 0) + 1);
+  if (nextStep <= 1) return PRESTIGE_REQUIREMENT;
+  return Math.ceil(PRESTIGE_REQUIREMENT * Math.pow(10, (nextStep - 1) / 2.5));
 }
 
 /**

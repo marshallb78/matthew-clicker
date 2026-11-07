@@ -85,22 +85,22 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
 
     it('scales click power and CPS with Capybara-style Ascension Multiplier (+0.05 per step), Friday 2x, and Storm Wave multipliers', () => {
       state.upgrades['finger_exercise'] = 9; // base click = 1 + 9 = 10
-      state.upgrades['energy_coffee'] = 10; // base CPS = 10 * 1.0 = 10.0
+      state.upgrades['energy_coffee'] = 10; // base CPS = 10 * 2.0 = 20.0, +10 click power -> total base click = 20
       state.prestigeShards = 40; // Ascension Multiplier = 1 + 40 * 0.05 = 3.0x
 
       const normalClick = calculateClickPower(state);
       const normalCps = calculateCPS(state);
       expect(normalClick.ascensionMultiplier).toBe(3);
-      expect(normalClick.totalPower).toBe(30); // 10 * 3x
-      expect(normalCps).toBeCloseTo(30.0); // 10 * 3x
+      expect(normalClick.totalPower).toBe(60); // 20 * 3x
+      expect(normalCps).toBeCloseTo(60.0); // 20 * 3x
 
       // Stack Friday 2x + 10x Storm Wave = 20x live multiplier on top of 3x Ascension Multiplier
       const liveOpts = { fridayBonusActive: true, stormWaveMultiplier: 10 };
       const boostedClick = calculateClickPower(state, liveOpts);
       const boostedCps = calculateCPS(state, liveOpts);
 
-      expect(boostedClick.totalPower).toBe(600); // 30 * 2 * 10
-      expect(boostedCps).toBeCloseTo(600.0); // 30 * 2 * 10
+      expect(boostedClick.totalPower).toBe(1200); // 60 * 2 * 10
+      expect(boostedCps).toBeCloseTo(1200.0); // 60 * 2 * 10
 
       const giantReward = calculateGiantMatthewClickReward(state, liveOpts);
       expect(giantReward).toBeGreaterThan(boostedClick.totalPower);
@@ -113,11 +113,14 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
       expect(getAscensionMultiplier(0)).toBe(1);
     });
 
-    it('calculates Ascension Multiplier bonus in +0.05 steps at and above 1M coins', () => {
+    it('calculates Ascension Multiplier bonus in +0.05 steps at 1M and prevents runaway scaling at 1T/1Qa', () => {
       expect(calculatePrestigeShards(1000000)).toBe(1);
       expect(calculatePrestigeShards(4000000)).toBe(2);
       expect(getAscensionMultiplier(1)).toBe(1.05);
       expect(getAscensionMultiplier(2)).toBe(1.1);
+      // Even at 1 Quadrillion (1e15) lifetime coins, multiplier stays controlled (< 3.0x)
+      const qaShards = calculatePrestigeShards(1e15);
+      expect(getAscensionMultiplier(qaShards)).toBeLessThan(3.0);
     });
   });
 
@@ -183,7 +186,9 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
     it('evaluates Matthew Storm schedule for Nov 13, 2026 1:50 PM – 2:00 PM EST and test simulation', () => {
       expect(MATTHEW_STORM_CONFIG.startIso).toBe('2026-11-13T13:50:00-05:00');
       expect(MATTHEW_STORM_CONFIG.endIso).toBe('2026-11-13T14:00:00-05:00');
-      expect(UPGRADES.length).toBe(32);
+      expect(UPGRADES.length).toBe(14);
+      expect(UPGRADES[0].baseCost).toBe(50);
+      expect(UPGRADES[1].baseCost).toBe(500);
 
       const startMs = Date.parse(MATTHEW_STORM_CONFIG.startIso);
       const endMs = Date.parse(MATTHEW_STORM_CONFIG.endIso);

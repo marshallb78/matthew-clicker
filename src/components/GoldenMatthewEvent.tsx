@@ -4,6 +4,7 @@ import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
 import { formatCoins } from '../utils/formatters';
 import { BALANCE } from '../data/balance';
+import { calculateCPS, calculateClickPower } from '../utils/calculations';
 
 interface GoldenMatthewEventProps {
   state: GameState;
@@ -77,8 +78,14 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
     soundManager.playCrit();
     particleEngine.emitClick(e.clientX, e.clientY, true, 25);
 
-    // Match reward directly to player's current coin score (minimum 100 if at 0)
-    const bounty = Math.max(100, Math.floor(state.coins));
+    // Scales meaningfully with the player's current production and score without bank-doubling exploits
+    const cps = calculateCPS(state);
+    const { totalPower } = calculateClickPower(state);
+    const productionBounty = Math.floor(
+      cps * BALANCE.goldenEvent.bountyCpsSeconds + totalPower * BALANCE.goldenEvent.bountyClickCount
+    );
+    const scoreScaledBounty = Math.floor(Math.min(state.coins * 0.08, productionBounty * 2.5));
+    const bounty = Math.max(BALANCE.goldenEvent.minBountyFloor, productionBounty, scoreScaledBounty);
 
     setState((prev) => ({
       ...prev,
@@ -109,7 +116,7 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
           style={{ animationDuration: '4s' }}
         />
         <img
-          src="./assets/skins/existing/golden_matthew.svg"
+          src="./images/skins/golden_matthew.png"
           alt="Golden Matthew"
           className="relative w-20 h-20 object-contain drop-shadow-[0_0_16px_rgba(255,215,0,0.95)]"
         />

@@ -11,7 +11,7 @@ export const QUESTS: Quest[] = [
     type: 'clicks',
     target: 2500,
     rewardGems: 5,
-    rewardCoins: 25000,
+    rewardCoins: 1500,
   },
   {
     id: 'daily_crits_200',
@@ -21,17 +21,17 @@ export const QUESTS: Quest[] = [
     type: 'crit_clicks',
     target: 200,
     rewardGems: 6,
-    rewardCoins: 75000,
+    rewardCoins: 2500,
   },
   {
     id: 'daily_upgrades_75',
     title: 'Daily Empire Builder',
-    description: 'Own at least 75 total upgrade levels.',
+    description: 'Own at least 50 total upgrade levels.',
     scope: 'daily',
     type: 'upgrades',
-    target: 75,
+    target: 50,
     rewardGems: 6,
-    rewardCoins: 250000,
+    rewardCoins: 10000,
   },
   {
     id: 'daily_coins_5m',
@@ -41,7 +41,7 @@ export const QUESTS: Quest[] = [
     type: 'coins',
     target: 5000000,
     rewardGems: 8,
-    rewardCoins: 750000,
+    rewardCoins: 250000,
   },
   {
     id: 'daily_rebirth_2',
@@ -51,10 +51,10 @@ export const QUESTS: Quest[] = [
     type: 'rebirth',
     target: 2,
     rewardGems: 10,
-    rewardCoins: 1500000,
+    rewardCoins: 500000,
   },
 
-  // Hard Season Quests
+  // Hard Season Quests (5–10 Hour Grind)
   {
     id: 'season_clicks_25000',
     title: 'Season Click Marathon',
@@ -63,7 +63,7 @@ export const QUESTS: Quest[] = [
     type: 'clicks',
     target: 25000,
     rewardGems: 20,
-    rewardCoins: 10000000,
+    rewardCoins: 50000,
   },
   {
     id: 'season_crits_2500',
@@ -73,17 +73,17 @@ export const QUESTS: Quest[] = [
     type: 'crit_clicks',
     target: 2500,
     rewardGems: 25,
-    rewardCoins: 50000000,
+    rewardCoins: 100000,
   },
   {
     id: 'season_upgrades_300',
     title: 'Season Monopoly Tycoon',
-    description: 'Own 300 total upgrade levels simultaneously.',
+    description: 'Own 180 total upgrade levels simultaneously.',
     scope: 'seasonal',
     type: 'upgrades',
-    target: 300,
+    target: 180,
     rewardGems: 30,
-    rewardCoins: 500000000,
+    rewardCoins: 2500000,
   },
   {
     id: 'season_rebirth_10',
@@ -93,7 +93,7 @@ export const QUESTS: Quest[] = [
     type: 'rebirth',
     target: 10,
     rewardGems: 35,
-    rewardCoins: 2500000000,
+    rewardCoins: 10000000,
   },
   {
     id: 'season_coins_1t',
@@ -103,7 +103,7 @@ export const QUESTS: Quest[] = [
     type: 'coins',
     target: 1000000000000,
     rewardGems: 50,
-    rewardCoins: 50000000000,
+    rewardCoins: 25000000000,
   },
   {
     id: 'season_coins_1qa',
@@ -113,7 +113,7 @@ export const QUESTS: Quest[] = [
     type: 'coins',
     target: 1000000000000000,
     rewardGems: 100,
-    rewardCoins: 10000000000000,
+    rewardCoins: 25000000000000,
   },
 ];
 

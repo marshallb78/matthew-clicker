@@ -7,6 +7,7 @@ import {
   PRESTIGE_REQUIREMENT,
   calculatePrestigeShards,
   getAscensionMultiplier,
+  getNextPrestigeRequirement,
 } from '../data/prestige';
 import {
   getUpgradeCost,
@@ -116,6 +117,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   const multGain = Math.max(0, potentialBonus - state.lifetimePrestigeShards);
   const nextAscensionMult = getAscensionMultiplier(state.prestigeShards + multGain);
   const multDeltaDisplay = (nextAscensionMult - currentAscensionMult).toFixed(2);
+  const nextRebirthReqCoins = getNextPrestigeRequirement(state.lifetimePrestigeShards);
   const canRebirth = state.lifetimeCoins >= PRESTIGE_REQUIREMENT && multGain > 0;
 
   const handleRebirth = () => {
@@ -528,7 +530,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               >
                 {canRebirth
                   ? `Rebirth Now → ${nextAscensionMult.toFixed(2)}× Ascension Multiplier`
-                  : `Requires 1M Lifetime Coins (${formatCoins(state.lifetimeCoins)} / 1M)`}
+                  : `Next +0.05× Tier at ${formatCoins(nextRebirthReqCoins)} Lifetime (${formatCoins(state.lifetimeCoins)} / ${formatCoins(nextRebirthReqCoins)})`}
               </button>
             </div>
           </div>
