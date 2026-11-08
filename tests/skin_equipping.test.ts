@@ -44,9 +44,9 @@ describe('Automatic Skin Equipping, Locked Skin Enforcement & Fast-Click Animati
       expect(state.unlockedSkins).toEqual(['classic_matthew']);
       expect(state.coins).toBe(0);
 
-      // Complete Broke Matthew milestone (500 lifetime points)
-      state.lifetimeCoins = 500;
-      state.coins = 500;
+      // Complete Broke Matthew milestone (2,500 lifetime points)
+      state.lifetimeCoins = 2500;
+      state.coins = 2500;
 
       const { state: updatedState, newlyUnlocked } = checkAndApplyMilestoneUnlocks(state, 0);
 
@@ -54,15 +54,15 @@ describe('Automatic Skin Equipping, Locked Skin Enforcement & Fast-Click Animati
       expect(newlyUnlocked[0].id).toBe('broke_matthew');
       expect(updatedState.unlockedSkins).toContain('broke_matthew');
       expect(updatedState.equippedSkin).toBe('broke_matthew');
-      expect(updatedState.coins).toBe(500);
+      expect(updatedState.coins).toBe(2500);
 
       const equippedSkinData = ALL_SKINS.find((s) => s.id === updatedState.equippedSkin);
       expect(equippedSkinData).toBeDefined();
       expect(equippedSkinData?.image).toBe('./images/skins/broke_matthew.png');
     });
 
-    it('works for every skin, including God Matthew at 1 Quadrillion (1e15) points', () => {
-      state.lifetimeCoins = 1000000000000000;
+    it('works for every skin, including God Matthew at 100 Octillion (1e29) points', () => {
+      state.lifetimeCoins = 1e29;
       const { state: updatedState } = checkAndApplyMilestoneUnlocks(state, 0);
 
       expect(updatedState.unlockedSkins).toContain('god_matthew');
@@ -85,7 +85,7 @@ describe('Automatic Skin Equipping, Locked Skin Enforcement & Fast-Click Animati
 
   describe('Scenario 3: Browser refresh persistence', () => {
     it('persists the equipped skin across save and reload cycles', () => {
-      state.lifetimeCoins = 5000;
+      state.lifetimeCoins = 100000;
       const { state: unlockedState } = checkAndApplyMilestoneUnlocks(state, 0);
       expect(unlockedState.equippedSkin).toBe('sad_matthew');
 
@@ -185,7 +185,7 @@ describe('Automatic Skin Equipping, Locked Skin Enforcement & Fast-Click Animati
 
   describe('Scenario 7 & 8: Deterministic multi-unlock without duplicates or thrashing', () => {
     it('deterministically unlocks multiple point-based skins and equips the highest-tier without duplicate cycles', () => {
-      state.lifetimeCoins = 2000000; // Unlocks broke_matthew (500), sad_matthew (5K), sleepy_matthew (75K), angry_matthew (1.5M)
+      state.lifetimeCoins = 1500000000; // Unlocks broke_matthew (2.5K), sad_matthew (100K), sleepy_matthew (10M), angry_matthew (1B)
 
       const { state: updatedState, newlyUnlocked } = checkAndApplyMilestoneUnlocks(state, 0);
 

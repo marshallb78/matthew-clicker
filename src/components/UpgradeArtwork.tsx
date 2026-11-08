@@ -13,6 +13,8 @@ const TIER_PALETTES: Record<number, { bg1: string; bg2: string; accent: string; 
   4: { bg1: '#2e1065', bg2: '#4c1d95', accent: '#fbbf24', glow: '#d97706' },
   5: { bg1: '#3b0764', bg2: '#701a75', accent: '#22d3ee', glow: '#f43f5e' },
   6: { bg1: '#451a03', bg2: '#78350f', accent: '#fde047', glow: '#f59e0b' },
+  7: { bg1: '#31042f', bg2: '#09203f', accent: '#f43f5e', glow: '#ec4899' },
+  8: { bg1: '#1a002c', bg2: '#422006', accent: '#fef08a', glow: '#38bdf8' },
 };
 
 export const UpgradeArtwork: React.FC<UpgradeArtworkProps> = ({

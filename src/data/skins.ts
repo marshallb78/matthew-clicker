@@ -1,5 +1,6 @@
 import { Skin, GameState } from '../types/game';
 import { GEM_ECONOMY_CONFIG } from '../config/gameConfig';
+import { formatCoins } from '../utils/formatters';
 
 export type { Skin };
 
@@ -36,8 +37,8 @@ export const SKINS: Skin[] = [
     fallbackImage: './assets/skins/existing/classic_matthew.svg',
     milestone: {
       type: 'lifetime_coins',
-      target: 500,
-      description: '500 Points',
+      target: 1000,
+      description: '1,000 Points',
     },
     clickBonusMultiplier: 1.0,
     cpsBonusMultiplier: 1.0,
@@ -54,8 +55,8 @@ export const SKINS: Skin[] = [
     fallbackImage: './assets/skins/existing/sad_matthew.svg',
     milestone: {
       type: 'lifetime_coins',
-      target: 5000,
-      description: '5,000 Points',
+      target: 50000,
+      description: '50K Points',
     },
     clickBonusMultiplier: 1.0,
     cpsBonusMultiplier: 1.0,
@@ -72,8 +73,8 @@ export const SKINS: Skin[] = [
     fallbackImage: './assets/skins/existing/sleepy_matthew.svg',
     milestone: {
       type: 'lifetime_coins',
-      target: 75000,
-      description: '75K Points',
+      target: 2500000,
+      description: '2.5M Points',
     },
     clickBonusMultiplier: 1.0,
     cpsBonusMultiplier: 1.0,
@@ -90,8 +91,8 @@ export const SKINS: Skin[] = [
     fallbackImage: './assets/skins/existing/angry_matthew.svg',
     milestone: {
       type: 'lifetime_coins',
-      target: 1500000,
-      description: '1.5M Points',
+      target: 150000000,
+      description: '150M Points',
     },
     clickBonusMultiplier: 1.0,
     cpsBonusMultiplier: 1.0,
@@ -108,8 +109,8 @@ export const SKINS: Skin[] = [
     fallbackImage: './assets/skins/existing/aura_matthew.svg',
     milestone: {
       type: 'lifetime_coins',
-      target: 35000000,
-      description: '35M Points',
+      target: 25000000000,
+      description: '25B Points',
     },
     clickBonusMultiplier: 1.0,
     cpsBonusMultiplier: 1.0,
@@ -126,8 +127,8 @@ export const SKINS: Skin[] = [
     fallbackImage: './assets/skins/existing/sigma_matthew.svg',
     milestone: {
       type: 'lifetime_coins',
-      target: 750000000,
-      description: '750M Points',
+      target: 5000000000000,
+      description: '5T Points',
     },
     clickBonusMultiplier: 1.0,
     cpsBonusMultiplier: 1.0,
@@ -144,8 +145,8 @@ export const SKINS: Skin[] = [
     fallbackImage: './assets/skins/existing/golden_matthew.svg',
     milestone: {
       type: 'lifetime_coins',
-      target: 20000000000,
-      description: '20B Points',
+      target: 1e16,
+      description: '10Qa Points',
     },
     clickBonusMultiplier: 1.0,
     cpsBonusMultiplier: 1.0,
@@ -162,8 +163,8 @@ export const SKINS: Skin[] = [
     fallbackImage: './assets/skins/existing/diamond_matthew.svg',
     milestone: {
       type: 'lifetime_coins',
-      target: 600000000000,
-      description: '600B Points',
+      target: 1e20,
+      description: '100Qi Points',
     },
     clickBonusMultiplier: 1.0,
     cpsBonusMultiplier: 1.0,
@@ -180,8 +181,8 @@ export const SKINS: Skin[] = [
     fallbackImage: './assets/skins/existing/galaxy_matthew.svg',
     milestone: {
       type: 'lifetime_coins',
-      target: 25000000000000,
-      description: '25T Points',
+      target: 1e24,
+      description: '1Sp Points',
     },
     clickBonusMultiplier: 1.0,
     cpsBonusMultiplier: 1.0,
@@ -198,8 +199,8 @@ export const SKINS: Skin[] = [
     fallbackImage: './assets/skins/existing/god_matthew.svg',
     milestone: {
       type: 'lifetime_coins',
-      target: 1000000000000000,
-      description: '1Qa Points',
+      target: 1e29,
+      description: '100Oc Points',
     },
     clickBonusMultiplier: 1.0,
     cpsBonusMultiplier: 1.0,
@@ -216,14 +217,14 @@ export const CHARACTER_SKINS: Skin[] = [
     name: 'Mathjew',
     rarity: 'Divine',
     category: 'characters',
-    description: 'SUPER SUPER RARE endgame character unlocked only by true quadrillionaires.',
+    description: 'SUPER SUPER RARE endgame character unlocked only by true decillionaires.',
     perkDescription: 'Ultra-Rare Flex',
     image: './images/skins/mathjew.png',
     fallbackImage: './assets/skins/characters/mathjew_normal.svg',
     milestone: {
       type: 'lifetime_coins',
-      target: 50000000000000000,
-      description: '50Qa Points (Super Rare)',
+      target: 1e34,
+      description: '10Dc Points (Super Rare)',
     },
     clickBonusMultiplier: 1.0,
     cpsBonusMultiplier: 1.0,
@@ -440,7 +441,7 @@ export function getSkinMilestoneProgress(
   );
   const isMet = current >= target;
   const percent = target > 0 ? Math.min(100, Math.floor((current / target) * 100)) : 100;
-  const progressLabel = `${Math.floor(current).toLocaleString()} / ${target.toLocaleString()} Points`;
+  const progressLabel = `${formatCoins(Math.floor(current))} / ${formatCoins(target)} Points`;
 
   return {
     current,

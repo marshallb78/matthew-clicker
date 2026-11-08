@@ -86,23 +86,23 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
     });
 
     it('scales click power and CPS with Capybara-style Ascension Multiplier (+0.05 per step), Friday 2x, and Storm Wave multipliers', () => {
-      state.upgrades['finger_exercise'] = 3; // base click = 1 + 3*3 = 10, base CPS = 3*0.5 = 1.5
-      state.upgrades['energy_coffee'] = 5; // base CPS = 1.5 + 5*3 = 16.5, +5*12 = 60 click power -> total base click = 70
+      state.upgrades['finger_exercise'] = 9; // base click = 1 + 9*1 = 10, base CPS = 9*0.3 = 2.7
+      state.upgrades['energy_coffee'] = 10; // base CPS = 2.7 + 10*2 = 22.7, +10*5 = 50 click power -> total base click = 60
       state.prestigeShards = 40; // Ascension Multiplier = 1 + 40 * 0.05 = 3.0x
 
       const normalClick = calculateClickPower(state);
       const normalCps = calculateCPS(state);
       expect(normalClick.ascensionMultiplier).toBe(3);
-      expect(normalClick.totalPower).toBe(210); // 70 * 3x
-      expect(normalCps).toBeCloseTo(49.5); // 16.5 * 3x
+      expect(normalClick.totalPower).toBe(180); // 60 * 3x
+      expect(normalCps).toBeCloseTo(68.1); // 22.7 * 3x
 
       // Stack Friday 2x + 10x Storm Wave = 20x live multiplier on top of 3x Ascension Multiplier
       const liveOpts = { fridayBonusActive: true, stormWaveMultiplier: 10 };
       const boostedClick = calculateClickPower(state, liveOpts);
       const boostedCps = calculateCPS(state, liveOpts);
 
-      expect(boostedClick.totalPower).toBe(4200); // 210 * 2 * 10
-      expect(boostedCps).toBeCloseTo(990.0); // 49.5 * 2 * 10
+      expect(boostedClick.totalPower).toBe(3600); // 180 * 2 * 10
+      expect(boostedCps).toBeCloseTo(1362.0); // 68.1 * 2 * 10
 
       const giantReward = calculateGiantMatthewClickReward(state, liveOpts);
       expect(giantReward).toBeGreaterThan(boostedClick.totalPower);
@@ -188,7 +188,9 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
     it('evaluates Matthew Storm schedule for Nov 13, 2026 1:50 PM – 2:00 PM EST and test simulation', () => {
       expect(MATTHEW_STORM_CONFIG.startIso).toBe('2026-11-13T13:50:00-05:00');
       expect(MATTHEW_STORM_CONFIG.endIso).toBe('2026-11-13T14:00:00-05:00');
-      expect(UPGRADES.length).toBe(14);
+      expect(UPGRADES.length).toBe(35);
+      expect(UPGRADES[0].baseCost).toBe(50);
+      expect(UPGRADES[1].baseCost).toBe(500);
       // Every upgrade prioritizes Click Power over passive CPS
       UPGRADES.forEach((u) => {
         expect(u.baseClickPower).toBeGreaterThan(u.baseCps);
