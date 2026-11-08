@@ -86,23 +86,23 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
     });
 
     it('scales click power and CPS with Capybara-style Ascension Multiplier (+0.05 per step), Friday 2x, and Storm Wave multipliers', () => {
-      state.upgrades['finger_exercise'] = 9; // base click = 1 + 9*1 = 10, base CPS = 9*0.3 = 2.7
-      state.upgrades['energy_coffee'] = 10; // base CPS = 2.7 + 10*2 = 22.7, +10*5 = 50 click power -> total base click = 60
+      state.upgrades['finger_exercise'] = 10; // base click = 1 + 10*0.5 = 6, base CPS = 10*0.2 = 2
+      state.upgrades['energy_coffee'] = 10; // base CPS = 2 + 10*0.5 = 7, +10*1.5 = 15 click power -> total base click = 21
       state.prestigeShards = 40; // Ascension Multiplier = 1 + 40 * 0.05 = 3.0x
 
       const normalClick = calculateClickPower(state);
       const normalCps = calculateCPS(state);
       expect(normalClick.ascensionMultiplier).toBe(3);
-      expect(normalClick.totalPower).toBe(180); // 60 * 3x
-      expect(normalCps).toBeCloseTo(68.1); // 22.7 * 3x
+      expect(normalClick.totalPower).toBe(63); // 21 * 3x
+      expect(normalCps).toBeCloseTo(21); // 7 * 3x
 
       // Stack Friday 2x + 10x Storm Wave = 20x live multiplier on top of 3x Ascension Multiplier
       const liveOpts = { fridayBonusActive: true, stormWaveMultiplier: 10 };
       const boostedClick = calculateClickPower(state, liveOpts);
       const boostedCps = calculateCPS(state, liveOpts);
 
-      expect(boostedClick.totalPower).toBe(3600); // 180 * 2 * 10
-      expect(boostedCps).toBeCloseTo(1362.0); // 68.1 * 2 * 10
+      expect(boostedClick.totalPower).toBe(1260); // 63 * 2 * 10
+      expect(boostedCps).toBeCloseTo(420.0); // 21 * 2 * 10
 
       const giantReward = calculateGiantMatthewClickReward(state, liveOpts);
       expect(giantReward).toBeGreaterThan(boostedClick.totalPower);
