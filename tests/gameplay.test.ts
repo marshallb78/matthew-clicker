@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   getDefaultGameState,
   performSeasonalRollover,
+  performBetaWipeIfDue,
 } from '../src/utils/storage';
 import {
   getUpgradeCost,
@@ -26,6 +27,7 @@ import {
   GEM_ECONOMY_CONFIG,
   MATTHEW_STORM_CONFIG,
   FRIDAY_BONUS_CONFIG,
+  BETA_RESET_CONFIG,
 } from '../src/config/gameConfig';
 import {
   isFridayBonusActive,
@@ -84,23 +86,23 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
     });
 
     it('scales click power and CPS with Capybara-style Ascension Multiplier (+0.05 per step), Friday 2x, and Storm Wave multipliers', () => {
-      state.upgrades['finger_exercise'] = 9; // base click = 1 + 9 = 10
-      state.upgrades['energy_coffee'] = 10; // base CPS = 10 * 2.0 = 20.0, +10 click power -> total base click = 20
+      state.upgrades['finger_exercise'] = 3; // base click = 1 + 3*3 = 10, base CPS = 3*0.5 = 1.5
+      state.upgrades['energy_coffee'] = 5; // base CPS = 1.5 + 5*3 = 16.5, +5*12 = 60 click power -> total base click = 70
       state.prestigeShards = 40; // Ascension Multiplier = 1 + 40 * 0.05 = 3.0x
 
       const normalClick = calculateClickPower(state);
       const normalCps = calculateCPS(state);
       expect(normalClick.ascensionMultiplier).toBe(3);
-      expect(normalClick.totalPower).toBe(60); // 20 * 3x
-      expect(normalCps).toBeCloseTo(60.0); // 20 * 3x
+      expect(normalClick.totalPower).toBe(210); // 70 * 3x
+      expect(normalCps).toBeCloseTo(49.5); // 16.5 * 3x
 
       // Stack Friday 2x + 10x Storm Wave = 20x live multiplier on top of 3x Ascension Multiplier
       const liveOpts = { fridayBonusActive: true, stormWaveMultiplier: 10 };
       const boostedClick = calculateClickPower(state, liveOpts);
       const boostedCps = calculateCPS(state, liveOpts);
 
-      expect(boostedClick.totalPower).toBe(1200); // 60 * 2 * 10
-      expect(boostedCps).toBeCloseTo(1200.0); // 60 * 2 * 10
+      expect(boostedClick.totalPower).toBe(4200); // 210 * 2 * 10
+      expect(boostedCps).toBeCloseTo(990.0); // 49.5 * 2 * 10
 
       const giantReward = calculateGiantMatthewClickReward(state, liveOpts);
       expect(giantReward).toBeGreaterThan(boostedClick.totalPower);
@@ -118,9 +120,9 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
       expect(calculatePrestigeShards(4000000)).toBe(2);
       expect(getAscensionMultiplier(1)).toBe(1.05);
       expect(getAscensionMultiplier(2)).toBe(1.1);
-      // Even at 1 Quadrillion (1e15) lifetime coins, multiplier stays controlled (< 3.0x)
+      // Even at 1 Quadrillion (1e15) lifetime coins, multiplier stays controlled (< 5.0x)
       const qaShards = calculatePrestigeShards(1e15);
-      expect(getAscensionMultiplier(qaShards)).toBeLessThan(3.0);
+      expect(getAscensionMultiplier(qaShards)).toBeLessThan(5.0);
     });
   });
 
@@ -187,8 +189,10 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
       expect(MATTHEW_STORM_CONFIG.startIso).toBe('2026-11-13T13:50:00-05:00');
       expect(MATTHEW_STORM_CONFIG.endIso).toBe('2026-11-13T14:00:00-05:00');
       expect(UPGRADES.length).toBe(14);
-      expect(UPGRADES[0].baseCost).toBe(50);
-      expect(UPGRADES[1].baseCost).toBe(500);
+      // Every upgrade prioritizes Click Power over passive CPS
+      UPGRADES.forEach((u) => {
+        expect(u.baseClickPower).toBeGreaterThan(u.baseCps);
+      });
 
       const startMs = Date.parse(MATTHEW_STORM_CONFIG.startIso);
       const endMs = Date.parse(MATTHEW_STORM_CONFIG.endIso);
@@ -268,6 +272,41 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
       expect(mathjew).toBeDefined();
       expect(mathjew?.milestone.target).toBeGreaterThanOrEqual(1e15);
       expect(mathgoon).toBeUndefined();
+    });
+  });
+
+  describe('Monday 1:00 AM Beta Reset Enforcement', () => {
+    it('wipes all progress (including guests and accounts) once Monday 1:00 AM hits and only wipes once', () => {
+      state.coins = 500000000;
+      state.lifetimeCoins = 500000000;
+      state.unlockedSkins = ['classic_matthew', 'sigma_matthew', 'god_matthew'];
+      state.equippedSkin = 'god_matthew';
+      state.gems = 95;
+      state.prestigeCount = 8;
+      state.prestigeShards = 15;
+      state.lastBetaWipeId = null;
+
+      // Before Monday 1:00 AM: no wipe
+      const preWipe = performBetaWipeIfDue(state, BETA_RESET_CONFIG.resetTimeMs - 60000);
+      expect(preWipe.wiped).toBe(false);
+      expect(preWipe.state.coins).toBe(500000000);
+
+      // At/After Monday 1:00 AM: full progress wipe
+      const postWipe = performBetaWipeIfDue(state, BETA_RESET_CONFIG.resetTimeMs + 1000);
+      expect(postWipe.wiped).toBe(true);
+      expect(postWipe.state.coins).toBe(0);
+      expect(postWipe.state.lifetimeCoins).toBe(0);
+      expect(postWipe.state.gems).toBe(0);
+      expect(postWipe.state.prestigeCount).toBe(0);
+      expect(postWipe.state.unlockedSkins).toEqual(['classic_matthew']);
+      expect(postWipe.state.equippedSkin).toBe('classic_matthew');
+      expect(postWipe.state.lastBetaWipeId).toBe(BETA_RESET_CONFIG.wipeId);
+
+      // Subsequent logins after wipe do not wipe new post-1AM progress
+      postWipe.state.coins = 12345;
+      const secondCheck = performBetaWipeIfDue(postWipe.state, BETA_RESET_CONFIG.resetTimeMs + 90000);
+      expect(secondCheck.wiped).toBe(false);
+      expect(secondCheck.state.coins).toBe(12345);
     });
   });
 });

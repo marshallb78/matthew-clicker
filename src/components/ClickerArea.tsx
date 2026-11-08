@@ -10,7 +10,8 @@ import {
   LiveMultiplierOptions,
 } from '../utils/calculations';
 import { MatthewStormState } from '../utils/scheduleEngine';
-import { MATTHEW_STORM_CONFIG, DEV_FLAGS } from '../config/gameConfig';
+import { MATTHEW_STORM_CONFIG, BETA_RESET_CONFIG } from '../config/gameConfig';
+import { BALANCE } from '../data/balance';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
 import { EnvironmentBackground } from './EnvironmentBackground';
@@ -25,7 +26,7 @@ import {
   Zap,
   Gem,
   ShoppingBag,
-  Play,
+  AlertTriangle,
   Infinity as InfinityIcon,
 } from 'lucide-react';
 
@@ -192,7 +193,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
     return () => clearInterval(ticker);
   }, [fridayBonusActive, stormWaveMultiplier, onNotify, setState]);
 
-  const triggerRestartableBounce = () => {
+  const triggerRestartableBounce = (isCrit = false) => {
     if (state.settings.reducedMotion) return;
     const el = spriteContainerRef.current;
     if (!el || typeof el.animate !== 'function') return;
@@ -201,15 +202,16 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
       clickAnimRef.current.cancel();
     }
 
+    const tiltDeg = (Math.random() - 0.5) * (isCrit ? 14 : 8);
     clickAnimRef.current = el.animate(
       [
-        { transform: 'scale(0.86, 1.14) rotate(-2deg)' },
-        { transform: 'scale(1.17, 0.86) rotate(2deg)' },
+        { transform: `scale(${isCrit ? 0.78 : 0.85}, ${isCrit ? 1.22 : 1.15}) rotate(${tiltDeg.toFixed(1)}deg)` },
+        { transform: `scale(${isCrit ? 1.24 : 1.18}, ${isCrit ? 0.82 : 0.86}) rotate(${(-tiltDeg * 0.6).toFixed(1)}deg)` },
         { transform: 'scale(0.95, 1.05) rotate(0deg)' },
         { transform: 'scale(1, 1) rotate(0deg)' },
       ],
       {
-        duration: 185,
+        duration: isCrit ? 220 : 175,
         easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
       }
     );
@@ -248,13 +250,13 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
       soundManager.playClick(state.combo);
     }
 
-    particleEngine.emitClick(clientX, clientY, isCrit, 8);
-    triggerRestartableBounce();
+    particleEngine.emitClick(clientX, clientY, isCrit, isCrit ? 14 : 9);
+    triggerRestartableBounce(isCrit);
 
     const floatId = Date.now() + Math.random();
-    const floatX = clientX + (Math.random() - 0.5) * 50;
-    const floatY = clientY - 40;
-    const floatValue = isCrit ? `CRIT! +${formatCoins(earned)}` : `+${formatCoins(earned)}`;
+    const floatX = clientX + (Math.random() - 0.5) * 60;
+    const floatY = clientY - 42;
+    const floatValue = isCrit ? `⚡ CRIT! +${formatCoins(earned)}` : `+${formatCoins(earned)}`;
 
     setFloatingNumbers((prev) => [
       ...prev.slice(-10),
@@ -352,8 +354,18 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   const zoomScale = 1 + (zoomSeconds / OVERDRIVE_TARGET_SECONDS) * 0.72;
   const zoomPercent = Math.min(100, Math.floor((zoomSeconds / OVERDRIVE_TARGET_SECONDS) * 100));
 
+  const secondsUntilBetaReset = Math.max(
+    0,
+    Math.floor((BETA_RESET_CONFIG.resetTimeMs - Date.now()) / 1000)
+  );
+  const comboPercent = Math.min(
+    100,
+    Math.floor(((state.combo || 0) / BALANCE.click.comboMax) * 100)
+  );
+  const comboBonusPct = Math.round((state.combo || 0) * BALANCE.click.comboBonusPerStack * 100);
+
   return (
-    <div className="relative flex-1 flex flex-col items-center justify-between h-full p-3 sm:p-4 select-none overflow-hidden">
+    <div className="relative flex-1 flex flex-col items-center justify-between h-full p-2.5 sm:p-4 select-none overflow-hidden">
       {/* 1. ATMOSPHERIC & LIVE STORM BACKGROUND */}
       <EnvironmentBackground
         state={state}
@@ -361,8 +373,19 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
         stormWaveActive={Boolean(currentWave)}
       />
 
-      {/* 2. TOP BAR: NAVIGATION, ACCOUNT, LEADERBOARD, GEMS & LIVE BANNERS */}
+      {/* 2. TOP BAR: BETA RESET ANNOUNCEMENT, NAVIGATION, ACCOUNT, LEADERBOARD, GEMS & LIVE BANNERS */}
       <div className="w-full flex flex-col gap-2 z-20">
+        {/* TOP BETA RESET ANNOUNCEMENT BANNER */}
+        <div className="w-full px-3 py-1.5 rounded-2xl bg-gradient-to-r from-rose-600/95 via-amber-500/95 to-rose-600/95 animate-banner-shimmer border-2 border-yellow-200/80 shadow-[0_0_24px_rgba(244,63,94,0.45)] flex items-center justify-center gap-2 text-center">
+          <AlertTriangle className="w-4 h-4 text-slate-950 shrink-0 animate-bounce" />
+          <span className="text-[11px] sm:text-xs font-black text-slate-950 uppercase tracking-wide">
+            {secondsUntilBetaReset > 0
+              ? `BETA ANNOUNCEMENT: Everyone's accounts & progress will be reset at 1:00 AM tomorrow (Monday)! • Reset in ${formatTime(
+                  secondsUntilBetaReset
+                )}`
+              : `MONDAY 1:00 AM BETA RESET ACTIVE: All accounts & progress have been freshly reset for the Click-Power update!`}
+          </span>
+        </div>
         <div className="w-full flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
             <button
@@ -495,29 +518,64 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
         </div>
       </div>
 
-      {/* 3. BIG CHUNKY COIN COUNTER */}
-      <div className="flex flex-col items-center z-20 my-auto sm:my-1">
-        <div className="flex items-center gap-2 drop-shadow-[0_4px_12px_rgba(0,0,0,0.6)]">
-          <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-gradient-to-tr from-amber-500 to-yellow-300 border-2 border-white flex items-center justify-center text-slate-950 font-black text-xl sm:text-2xl shadow-lg shadow-yellow-500/40">
+      {/* 3. BIG CHUNKY COIN COUNTER + CLICK-POWER-FIRST HUD */}
+      <div className="flex flex-col items-center z-20 my-auto sm:my-1 w-full max-w-md">
+        <div className="flex items-center gap-2.5 drop-shadow-[0_6px_18px_rgba(251,191,36,0.35)]">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-tr from-amber-500 via-yellow-300 to-amber-200 border-2 border-white flex items-center justify-center text-slate-950 font-black text-xl sm:text-2xl shadow-[0_0_22px_rgba(251,191,36,0.6)] rotate-[-4deg]">
             M
           </div>
-          <span className="text-4xl sm:text-6xl font-black text-yellow-300 tracking-tight font-chunky drop-shadow-[0_4px_0_#92400e]">
+          <span className="text-4xl sm:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-b from-yellow-100 via-yellow-300 to-amber-400 tracking-tight font-chunky drop-shadow-[0_4px_0_#78350f]">
             {formatCoins(state.coins)}
           </span>
         </div>
 
-        <div className="flex items-center gap-2 mt-1 text-xs sm:text-sm font-bold text-slate-300/90 bg-slate-950/75 backdrop-blur-md px-3.5 py-0.5 rounded-full border border-slate-800">
-          <span>{formatCoins(cps)}</span>
-          <span className="text-slate-400 font-semibold">per second</span>
+        {/* CLICK POWER PRIMARY PILL + PASSIVE CPS SECONDARY PILL */}
+        <div className="flex items-center justify-center gap-2 mt-1.5 flex-wrap">
+          <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-gradient-to-r from-cyan-500/25 via-sky-500/20 to-amber-500/25 border-2 border-cyan-400/70 text-xs sm:text-sm font-black text-cyan-200 shadow-[0_0_16px_rgba(34,211,238,0.25)]">
+            <Zap className="w-3.5 h-3.5 text-yellow-300 fill-yellow-300" />
+            <span className="text-yellow-300">+{formatCoins(totalPower)}</span>
+            <span className="text-cyan-200">per click</span>
+          </div>
+
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-950/85 border border-slate-700/90 text-xs font-bold text-slate-300">
+            <span className="text-amber-300 font-black">{formatCoins(cps)}</span>
+            <span className="text-slate-400">/ sec</span>
+          </div>
+
           {(fridayBonusActive || stormWaveMultiplier > 1) && (
-            <span className="text-fuchsia-300 font-black">
-              • {(fridayBonusActive ? 2 : 1) * stormWaveMultiplier}× Live Multiplier!
+            <span className="px-2.5 py-0.5 rounded-full bg-fuchsia-600/30 border border-fuchsia-400 text-[11px] text-fuchsia-200 font-black">
+              {(fridayBonusActive ? 2 : 1) * stormWaveMultiplier}× LIVE BOOST!
             </span>
           )}
         </div>
 
+        {/* LIVE COMBO & CRIT METER BAR */}
+        <div className="mt-2 flex flex-col items-center gap-1 bg-slate-950/85 backdrop-blur-md px-3.5 py-1.5 rounded-2xl border border-slate-800/90 shadow-lg w-full max-w-xs">
+          <div className="flex items-center justify-between w-full text-[11px] font-black">
+            <span className="flex items-center gap-1 text-cyan-300">
+              <Flame
+                className={`w-3.5 h-3.5 ${
+                  state.combo > 0 ? 'text-amber-400 animate-pulse' : 'text-slate-500'
+                }`}
+              />
+              <span>
+                Combo {state.combo}× (+{comboBonusPct}% Click)
+              </span>
+            </span>
+            <span className="text-amber-300 font-mono">
+              {Math.round(critChance * 100)}% Crit ({critMultiplier}×)
+            </span>
+          </div>
+          <div className="w-full h-2 rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-cyan-400 via-amber-400 to-rose-500 transition-all duration-150"
+              style={{ width: `${comboPercent}%` }}
+            />
+          </div>
+        </div>
+
         {/* NEXT SKIN GOAL MILESTONE PROGRESS BAR */}
-        <div className="mt-2 flex flex-col items-center gap-1 bg-slate-950/75 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-slate-800/80 shadow-md max-w-xs w-full">
+        <div className="mt-1.5 flex flex-col items-center gap-1 bg-slate-950/80 backdrop-blur-md px-3.5 py-1.5 rounded-2xl border border-slate-800/80 shadow-md max-w-xs w-full">
           <div className="flex items-center justify-between w-full text-[11px] font-black">
             <span className="flex items-center gap-1 text-slate-300 truncate pr-2">
               <Target className="w-3 h-3 text-amber-400 shrink-0" />
@@ -732,10 +790,10 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
       {floatingNumbers.map((f) => (
         <div
           key={f.id}
-          className={`fixed pointer-events-none font-black z-50 animate-float-coin select-none font-chunky ${
+          className={`fixed pointer-events-none font-black z-50 select-none font-chunky ${
             f.isCrit
-              ? 'text-yellow-200 text-3xl sm:text-4xl drop-shadow-[0_3px_0_#b45309]'
-              : 'text-amber-300 text-2xl sm:text-3xl drop-shadow-[0_2px_0_#78350f]'
+              ? 'animate-float-crit text-cyan-200 text-3xl sm:text-4xl drop-shadow-[0_4px_12px_rgba(34,211,238,0.85)]'
+              : 'animate-float-coin text-amber-300 text-2xl sm:text-3xl drop-shadow-[0_2px_0_#78350f]'
           }`}
           style={{
             left: f.x,

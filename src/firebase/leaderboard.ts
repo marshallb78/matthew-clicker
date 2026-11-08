@@ -13,6 +13,7 @@ import { getFirebaseServices } from './config';
 import { GameState } from '../types/game';
 import { getActiveSeason } from '../utils/scheduleEngine';
 import { getAscensionMultiplier } from '../data/prestige';
+import { BETA_RESET_CONFIG } from '../config/gameConfig';
 
 export interface LeaderboardEntry {
   uid: string;
@@ -61,6 +62,7 @@ export async function updateLeaderboardEntry(
         Array.isArray(state.unlockedSkins) && state.unlockedSkins.length > 0
           ? state.unlockedSkins
           : ['classic_matthew'],
+      lastBetaWipeId: state.lastBetaWipeId || null,
       updatedAtMs: Date.now(),
       updatedAt: serverTimestamp(),
     },
@@ -84,8 +86,17 @@ export async function fetchWorldwideLeaderboard(
     const snap = await getDocs(q);
 
     const list: LeaderboardEntry[] = [];
+    const isPostBetaReset = Date.now() >= BETA_RESET_CONFIG.resetTimeMs;
     snap.forEach((docSnap) => {
       const d = docSnap.data();
+      const updatedAtMs = typeof d.updatedAtMs === 'number' ? d.updatedAtMs : 0;
+      if (
+        isPostBetaReset &&
+        d.lastBetaWipeId !== BETA_RESET_CONFIG.wipeId &&
+        updatedAtMs < BETA_RESET_CONFIG.resetTimeMs
+      ) {
+        return;
+      }
       list.push({
         uid: d.uid || docSnap.id,
         username: d.username || 'Anonymous Matthew',

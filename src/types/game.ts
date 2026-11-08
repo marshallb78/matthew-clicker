@@ -224,6 +224,7 @@ export interface GameState {
   selectedEnvironment?: string;
   introCutsceneSeen: boolean;
   discoveredEasterEggs: string[];
+  lastBetaWipeId?: string | null;
   cloudAccount?: {
     uid: string;
     username: string;

@@ -7,10 +7,14 @@ import {
 } from 'firebase/firestore';
 import { getFirebaseServices } from './config';
 import { GameState } from '../types/game';
-import { sanitizeAndValidateGameState, saveGame } from '../utils/storage';
+import {
+  sanitizeAndValidateGameState,
+  saveGame,
+  performBetaWipeIfDue,
+} from '../utils/storage';
 import { getActiveSeason } from '../utils/scheduleEngine';
 import { MATTHEW_STORM_SKINS, equipSkin, isValidSkinId } from '../data/skins';
-import { GEM_ECONOMY_CONFIG } from '../config/gameConfig';
+import { GEM_ECONOMY_CONFIG, BETA_RESET_CONFIG } from '../config/gameConfig';
 import { updateLeaderboardEntry } from './leaderboard';
 
 export type CloudSyncStatus = 'idle' | 'syncing' | 'synced' | 'offline_pending' | 'error';
@@ -46,57 +50,82 @@ export async function loadAndReconcileCloudSave(
   const permData = userSnap.exists() ? userSnap.data() : {};
   const seasonData = seasonSnap.exists() ? seasonSnap.data() : {};
 
+  // Check if Monday 1:00 AM Beta Reset is active and whether the cloud save is pre-wipe
+  const nowMs = Date.now();
+  const isPostBetaReset = nowMs >= BETA_RESET_CONFIG.resetTimeMs;
+  const cloudAlreadyWiped =
+    permData.lastBetaWipeId === BETA_RESET_CONFIG.wipeId &&
+    seasonData.lastBetaWipeId === BETA_RESET_CONFIG.wipeId;
+
+  // Ensure localState itself has been wiped if past Monday 1:00 AM
+  const { state: checkedLocal } = performBetaWipeIfDue(localState, nowMs);
+
+  if (isPostBetaReset && !cloudAlreadyWiped) {
+    // Cloud save is from before Monday 1:00 AM! Overwrite cloud & leaderboard with fresh wiped state!
+    const freshWiped: GameState = {
+      ...checkedLocal,
+      lastBetaWipeId: BETA_RESET_CONFIG.wipeId,
+    };
+    saveGame(freshWiped);
+    await saveStateToCloud(uid, username, freshWiped);
+    return freshWiped;
+  }
+
   // Merge permanent skin ownership (permanent across all seasons & devices)
   const cloudSkins: string[] = Array.isArray(permData.unlockedSkins) ? permData.unlockedSkins : [];
   const mergedSkins = Array.from(
-    new Set(['classic_matthew', ...localState.unlockedSkins, ...cloudSkins])
+    new Set(['classic_matthew', ...checkedLocal.unlockedSkins, ...cloudSkins])
   ).filter((id) => isValidSkinId(id));
 
   // Determine whether cloud seasonal progress is ahead of local state (e.g., logging in on a second device)
   const cloudLifetimeCoins = typeof seasonData.lifetimeCoins === 'number' ? seasonData.lifetimeCoins : 0;
-  const useCloudSeason = seasonSnap.exists() && cloudLifetimeCoins >= localState.lifetimeCoins;
+  const useCloudSeason = seasonSnap.exists() && cloudLifetimeCoins >= checkedLocal.lifetimeCoins;
 
   const chosenEquippedSkin =
     typeof permData.equippedSkin === 'string' && mergedSkins.includes(permData.equippedSkin)
       ? permData.equippedSkin
-      : mergedSkins.includes(localState.equippedSkin)
-      ? localState.equippedSkin
+      : mergedSkins.includes(checkedLocal.equippedSkin)
+      ? checkedLocal.equippedSkin
       : 'classic_matthew';
 
   const mergedRaw: Partial<GameState> = {
-    ...(useCloudSeason ? seasonData : localState),
+    ...(useCloudSeason ? seasonData : checkedLocal),
     unlockedSkins: mergedSkins,
     equippedSkin: chosenEquippedSkin,
-    gems: Math.max(localState.gems || 0, typeof permData.gems === 'number' ? permData.gems : 0),
+    gems: Math.max(checkedLocal.gems || 0, typeof permData.gems === 'number' ? permData.gems : 0),
     lifetimeGems: Math.max(
-      localState.lifetimeGems || 0,
+      checkedLocal.lifetimeGems || 0,
       typeof permData.lifetimeGems === 'number' ? permData.lifetimeGems : 0
     ),
     permanentAchievements: Array.from(
       new Set([
-        ...(localState.permanentAchievements || []),
+        ...(checkedLocal.permanentAchievements || []),
         ...(Array.isArray(permData.permanentAchievements) ? permData.permanentAchievements : []),
       ])
     ),
     seasonHistory: Array.isArray(permData.seasonHistory)
       ? permData.seasonHistory
-      : localState.seasonHistory || [],
+      : checkedLocal.seasonHistory || [],
     lastDailyLoginClaimDate:
-      permData.lastDailyLoginClaimDate || localState.lastDailyLoginClaimDate || null,
+      permData.lastDailyLoginClaimDate || checkedLocal.lastDailyLoginClaimDate || null,
     currentSeasonId: activeSeason.seasonId,
-    introCutsceneSeen: Boolean(permData.introCutsceneSeen || localState.introCutsceneSeen),
+    introCutsceneSeen: Boolean(permData.introCutsceneSeen || checkedLocal.introCutsceneSeen),
+    lastBetaWipeId: isPostBetaReset
+      ? BETA_RESET_CONFIG.wipeId
+      : permData.lastBetaWipeId || checkedLocal.lastBetaWipeId || null,
     settings: {
-      ...localState.settings,
+      ...checkedLocal.settings,
       ...(permData.settings && typeof permData.settings === 'object' ? permData.settings : {}),
     },
   };
 
   const reconciled = sanitizeAndValidateGameState(mergedRaw);
-  saveGame(reconciled);
+  const { state: finalReconciled } = performBetaWipeIfDue(reconciled, nowMs);
+  saveGame(finalReconciled);
 
   // Sync reconciled state back to cloud
-  await saveStateToCloud(uid, username, reconciled);
-  return reconciled;
+  await saveStateToCloud(uid, username, finalReconciled);
+  return finalReconciled;
 }
 
 /**
@@ -129,12 +158,14 @@ export async function saveStateToCloud(
     lifetimeAllSeasonsClicks: Math.max(state.lifetimeAllSeasonsClicks || 0, state.clicks),
     introCutsceneSeen: state.introCutsceneSeen,
     discoveredEasterEggs: state.discoveredEasterEggs || [],
+    lastBetaWipeId: state.lastBetaWipeId || null,
     settings: state.settings,
     updatedAt: serverTimestamp(),
   };
 
   const seasonalPayload = {
     seasonId: activeSeason.seasonId,
+    lastBetaWipeId: state.lastBetaWipeId || null,
     coins: state.coins,
     lifetimeCoins: state.lifetimeCoins,
     seasonalScore: Math.max(state.seasonalScore || 0, Math.floor(state.lifetimeCoins)),

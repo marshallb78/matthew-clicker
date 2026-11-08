@@ -2,7 +2,7 @@ import { GameState, RealmId } from '../types/game';
 import { calculateCPS } from './calculations';
 import { isValidSkinId, checkAndApplyMilestoneUnlocks } from '../data/skins';
 import { getActiveSeason, getAuthoritativeDateString } from './scheduleEngine';
-import { MATTHEW_STORM_CONFIG } from '../config/gameConfig';
+import { MATTHEW_STORM_CONFIG, BETA_RESET_CONFIG } from '../config/gameConfig';
 
 const SAVE_KEY = 'matthew_clicker_save_v1';
 
@@ -67,6 +67,8 @@ export function getDefaultGameState(): GameState {
     giantMatthewsClicked: 0,
     introCutsceneSeen: false,
     discoveredEasterEggs: [],
+    lastBetaWipeId:
+      Date.now() >= BETA_RESET_CONFIG.resetTimeMs ? BETA_RESET_CONFIG.wipeId : null,
     cloudAccount: null,
 
     settings: {
@@ -375,6 +377,7 @@ export function sanitizeAndValidateGameState(parsed: any): GameState {
     selectedEnvironment: parsed.selectedEnvironment,
     introCutsceneSeen: Boolean(parsed.introCutsceneSeen),
     discoveredEasterEggs: Array.isArray(parsed.discoveredEasterEggs) ? parsed.discoveredEasterEggs : [],
+    lastBetaWipeId: typeof parsed.lastBetaWipeId === 'string' ? parsed.lastBetaWipeId : null,
     cloudAccount: parsed.cloudAccount && typeof parsed.cloudAccount === 'object' ? parsed.cloudAccount : null,
     settings,
   };
@@ -387,6 +390,33 @@ export function sanitizeAndValidateGameState(parsed: any): GameState {
   return reconciledState;
 }
 
+/**
+ * Enforces the Monday 1:00 AM Beta Reset for both local (guest) and signed-in players.
+ * Once the clock reaches BETA_RESET_CONFIG.resetTimeMs, any save that does not yet carry
+ * BETA_RESET_CONFIG.wipeId has all progress (coins, upgrades, rebirths, skins, gems, quests) wiped!
+ */
+export function performBetaWipeIfDue(
+  state: GameState,
+  nowMs: number = Date.now()
+): { state: GameState; wiped: boolean } {
+  if (nowMs < BETA_RESET_CONFIG.resetTimeMs) {
+    return { state, wiped: false };
+  }
+  if (state.lastBetaWipeId === BETA_RESET_CONFIG.wipeId) {
+    return { state, wiped: false };
+  }
+
+  const fresh = getDefaultGameState();
+  const wipedState: GameState = {
+    ...fresh,
+    lastBetaWipeId: BETA_RESET_CONFIG.wipeId,
+    cloudAccount: state.cloudAccount || null,
+    settings: state.settings || fresh.settings,
+    lastSaveTime: nowMs,
+  };
+  return { state: wipedState, wiped: true };
+}
+
 export function loadGame(): GameState {
   try {
     if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
@@ -397,9 +427,10 @@ export function loadGame(): GameState {
 
     const parsed = JSON.parse(raw);
     const sanitized = sanitizeAndValidateGameState(parsed);
+    const { state: finalState } = performBetaWipeIfDue(sanitized);
 
-    saveGame(sanitized);
-    return sanitized;
+    saveGame(finalState);
+    return finalState;
   } catch (err) {
     console.error('Save file corrupted, recovering default game state:', err);
     return getDefaultGameState();

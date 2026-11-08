@@ -1,31 +1,33 @@
 import { Upgrade } from '../types/game';
 
 /**
- * 14 Spread-Out Upgrades (~10x cost spacing starting at 50 -> 500 -> 5,000...)
- * Balanced for a 5–10 hour progression curve to reach endgame Quadrillions (1Qa).
+ * 14 Click-Power-Driven Upgrades!
+ * Designed so Click Power is always the primary driver of progression (baseClickPower is ~3x-4x higher than baseCps),
+ * with smooth, fast early/mid progression so players get hooked immediately and can reach Billions in ~20-30 minutes
+ * of active clicking!
  */
 export const UPGRADES: Upgrade[] = [
-  // --- TIER 1: BEDROOM GRIND (50 – 50K) ---
+  // --- TIER 1: BEDROOM GRIND (25 – 8,000) ---
   {
     id: 'finger_exercise',
     name: 'Jitter-Click Espresso',
-    description: '+Click Power',
+    description: '+Click Power Surge',
     icon: 'espresso',
-    baseCost: 50,
-    costMultiplier: 1.20,
-    baseCps: 0,
-    baseClickPower: 1,
+    baseCost: 25,
+    costMultiplier: 1.15,
+    baseCps: 0.5,
+    baseClickPower: 3,
     tier: 1,
   },
   {
     id: 'energy_coffee',
     name: 'Neon Gamer Tub',
-    description: '+Passive CPS',
+    description: '+Click & Passive Boost',
     icon: 'gamertub',
-    baseCost: 500,
-    costMultiplier: 1.21,
-    baseCps: 2,
-    baseClickPower: 1,
+    baseCost: 150,
+    costMultiplier: 1.15,
+    baseCps: 3,
+    baseClickPower: 12,
     tier: 1,
   },
   {
@@ -33,10 +35,10 @@ export const UPGRADES: Upgrade[] = [
     name: '2009 Macro Script',
     description: 'sketchy_clicker.exe',
     icon: 'bot',
-    baseCost: 5000,
-    costMultiplier: 1.22,
-    baseCps: 14,
-    baseClickPower: 4,
+    baseCost: 1000,
+    costMultiplier: 1.16,
+    baseCps: 18,
+    baseClickPower: 65,
     tier: 1,
   },
   {
@@ -44,23 +46,23 @@ export const UPGRADES: Upgrade[] = [
     name: '12g Honeycomb Mouse',
     description: 'Drag-click beast',
     icon: 'mouse',
-    baseCost: 50000,
-    costMultiplier: 1.22,
-    baseCps: 95,
-    baseClickPower: 18,
+    baseCost: 7500,
+    costMultiplier: 1.16,
+    baseCps: 110,
+    baseClickPower: 400,
     tier: 1,
   },
 
-  // --- TIER 2: STREAMER EMPIRE (500K – 50M) ---
+  // --- TIER 2: STREAMER EMPIRE (55K – 28M) ---
   {
     id: 'studio_microphone',
     name: 'Bass-Boosted Mic',
     description: '+40dB hype farm',
     icon: 'mic',
-    baseCost: 500000,
-    costMultiplier: 1.23,
-    baseCps: 650,
-    baseClickPower: 85,
+    baseCost: 55000,
+    costMultiplier: 1.17,
+    baseCps: 700,
+    baseClickPower: 2500,
     tier: 2,
   },
   {
@@ -68,10 +70,10 @@ export const UPGRADES: Upgrade[] = [
     name: 'Quad-RTX 9090 Rig',
     description: 'Liquid-nitrogen cooled',
     icon: 'gpu',
-    baseCost: 5000000,
-    costMultiplier: 1.23,
+    baseCost: 420000,
+    costMultiplier: 1.17,
     baseCps: 4500,
-    baseClickPower: 420,
+    baseClickPower: 16000,
     tier: 2,
   },
   {
@@ -79,23 +81,23 @@ export const UPGRADES: Upgrade[] = [
     name: 'Viral Phonk Edit Bot',
     description: 'Sigma Matthew edits',
     icon: 'phonk',
-    baseCost: 50000000,
-    costMultiplier: 1.24,
+    baseCost: 3500000,
+    costMultiplier: 1.17,
     baseCps: 32000,
-    baseClickPower: 2200,
+    baseClickPower: 115000,
     tier: 2,
   },
 
-  // --- TIER 3: INDUSTRIAL & BIO TECH (500M – 50B) ---
+  // --- TIER 3: INDUSTRIAL & BIO TECH (30M – 22B) ---
   {
     id: 'cloning_lab',
     name: 'CRISPR Matthew Vat',
     description: 'Lab-grown clickers',
     icon: 'dna',
-    baseCost: 500000000,
-    costMultiplier: 1.24,
-    baseCps: 230000,
-    baseClickPower: 12000,
+    baseCost: 30000000,
+    costMultiplier: 1.18,
+    baseCps: 240000,
+    baseClickPower: 850000,
     tier: 3,
   },
   {
@@ -103,10 +105,10 @@ export const UPGRADES: Upgrade[] = [
     name: 'Matthewtrix Server',
     description: 'RAM coin duplicator',
     icon: 'server',
-    baseCost: 5000000000,
-    costMultiplier: 1.25,
-    baseCps: 1700000,
-    baseClickPower: 70000,
+    baseCost: 260000000,
+    costMultiplier: 1.18,
+    baseCps: 1800000,
+    baseClickPower: 6500000,
     tier: 3,
   },
   {
@@ -114,23 +116,23 @@ export const UPGRADES: Upgrade[] = [
     name: 'Fusion Click Core',
     description: '200GW click turbine',
     icon: 'reactor',
-    baseCost: 50000000000,
-    costMultiplier: 1.25,
-    baseCps: 13000000,
-    baseClickPower: 420000,
+    baseCost: 2400000000,
+    costMultiplier: 1.18,
+    baseCps: 14000000,
+    baseClickPower: 52000000,
     tier: 4,
   },
 
-  // --- TIER 4: PLANETARY & COSMIC (500B – 500T) ---
+  // --- TIER 4: PLANETARY & COSMIC (22B – 20T) ---
   {
     id: 'mars_matthew_colony',
     name: 'Mars Terraform Dome',
     description: 'Red planet coin mines',
     icon: 'mars',
-    baseCost: 500000000000,
-    costMultiplier: 1.26,
-    baseCps: 105000000,
-    baseClickPower: 2800000,
+    baseCost: 22000000000,
+    costMultiplier: 1.19,
+    baseCps: 115000000,
+    baseClickPower: 420000000,
     tier: 4,
   },
   {
@@ -138,10 +140,10 @@ export const UPGRADES: Upgrade[] = [
     name: 'Solar Dyson Swarm',
     description: 'Star-powered clicker',
     icon: 'dyson',
-    baseCost: 5000000000000,
-    costMultiplier: 1.26,
-    baseCps: 880000000,
-    baseClickPower: 20000000,
+    baseCost: 210000000000,
+    costMultiplier: 1.19,
+    baseCps: 950000000,
+    baseClickPower: 3500000000,
     tier: 5,
   },
   {
@@ -149,10 +151,10 @@ export const UPGRADES: Upgrade[] = [
     name: 'Quasar Jet Harvester',
     description: 'Black hole aura beam',
     icon: 'blackhole',
-    baseCost: 50000000000000,
-    costMultiplier: 1.27,
-    baseCps: 7500000000,
-    baseClickPower: 150000000,
+    baseCost: 2000000000000,
+    costMultiplier: 1.20,
+    baseCps: 8000000000,
+    baseClickPower: 30000000000,
     tier: 5,
   },
   {
@@ -160,10 +162,10 @@ export const UPGRADES: Upgrade[] = [
     name: 'Apex Matthew Singularity',
     description: 'Everything is Matthew',
     icon: 'apex_god',
-    baseCost: 500000000000000,
-    costMultiplier: 1.28,
-    baseCps: 65000000000,
-    baseClickPower: 1200000000,
+    baseCost: 20000000000000,
+    costMultiplier: 1.20,
+    baseCps: 70000000000,
+    baseClickPower: 260000000000,
     tier: 6,
   },
 ];

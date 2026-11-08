@@ -4,12 +4,22 @@
  * are centrally configured here so future seasons and events never require core rewrites.
  */
 
-export const GAME_VERSION = '1.1.0';
+export const GAME_VERSION = '1.2.0';
 
 export const TIMEZONE_CONFIG = {
   /** Authoritative IANA timezone used for Seasons, Friday 2x, and Matthew Storm */
   timezone: 'America/New_York',
   utcOffsetHoursStandard: -5, // EST (November is Standard Time)
+};
+
+export const BETA_RESET_CONFIG = {
+  /** Unique identifier for the Monday 1:00 AM global beta reset */
+  wipeId: 'monday_nov_9_2026_1am_wipe_v1',
+  /** Monday, November 9, 2026 at 1:00 AM EST */
+  resetIso: '2026-11-09T01:00:00-05:00',
+  resetTimeMs: Date.parse('2026-11-09T01:00:00-05:00'),
+  announcementText:
+    "BETA ANNOUNCEMENT: Everyone's accounts & progress will be reset at 1:00 AM tomorrow (Monday)!",
 };
 
 export const SEASON_CONFIG = {
@@ -84,10 +94,10 @@ export const MATTHEW_STORM_CONFIG = {
 export const CLICK_SAFETY_CONFIG = {
   /** Maximum human/assisted clicks accepted per second to prevent script abuse */
   maxClicksPerSecond: 30,
-  comboMax: 50,
-  comboStepBonus: 0.02, // Up to +100% at 50x combo
-  comboDecaySeconds: 1.5,
-  baseCritChance: 0.04,
+  comboMax: 30,
+  comboStepBonus: 0.02, // Up to +60% at 30x combo
+  comboDecaySeconds: 1.8,
+  baseCritChance: 0.06,
   baseCritMultiplier: 3.0,
 };
 

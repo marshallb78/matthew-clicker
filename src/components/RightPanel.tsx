@@ -411,12 +411,13 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
                           <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
                             {upgrade.baseClickPower > 0 && (
-                              <span className="px-2 py-0.5 rounded-lg bg-cyan-500/15 border border-cyan-400/40 text-[11px] font-black text-cyan-300">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-gradient-to-r from-cyan-500/25 to-sky-500/20 border border-cyan-400/60 text-[11px] font-black text-cyan-200 shadow-sm">
+                                <Zap className="w-3 h-3 text-yellow-300 fill-yellow-300" />
                                 +{formatCoins(upgrade.baseClickPower * countToDisplay)} Click
                               </span>
                             )}
                             {upgrade.baseCps > 0 && (
-                              <span className="px-2 py-0.5 rounded-lg bg-amber-500/15 border border-amber-400/40 text-[11px] font-black text-amber-300">
+                              <span className="px-2 py-0.5 rounded-lg bg-slate-900/80 border border-amber-400/35 text-[10px] font-bold text-amber-300/90">
                                 +{formatCoins(upgrade.baseCps * countToDisplay)}/s
                               </span>
                             )}

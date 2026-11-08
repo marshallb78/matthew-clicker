@@ -1,17 +1,17 @@
 /**
  * Centralized Economy and Balance Configuration for Matthew Clicker.
- * Defines progression formulas, pacing targets, multipliers, and scaling curves.
+ * Click-Power-First Balance: Active clicking dominates passive CPS!
  */
 
 export const BALANCE = {
-  // --- CLICK DYNAMICS ---
+  // --- CLICK DYNAMICS (Click Power is Primary!) ---
   click: {
     basePower: 1,
-    baseCritChance: 0.03, // 3% base crit chance
-    baseCritMultiplier: 2.0, // 2x base damage on crit
-    comboMax: 20, // Max combo count
-    comboBonusPerStack: 0.01, // +1% per combo (up to +20% at 20 combo)
-    comboTimerResetSec: 1.5, // Window between clicks to maintain combo
+    baseCritChance: 0.06, // 6% base crit chance
+    baseCritMultiplier: 3.0, // 3x damage on critical hit!
+    comboMax: 30, // Up to 30x combo meter
+    comboBonusPerStack: 0.02, // +2% click power per combo stack (up to +60% at 30 combo!)
+    comboTimerResetSec: 1.8, // Generous window to sustain combo
   },
 
   // --- PASSIVE INCOME & TIMERS ---
@@ -21,19 +21,18 @@ export const BALANCE = {
 
   // --- GOLDEN MATTHEW BONUS EVENT ---
   goldenEvent: {
-    baseDelayMs: 180000, // Average 3 minutes between appearances
-    delayVarianceMs: 45000,
-    flightDurationMs: 10000, // 10 seconds on screen
-    frenzyDurationSec: 10,
-    frenzyMultiplier: 2.0, // 2.0x during frenzy
-    bountyCpsSeconds: 30, // awards 30 seconds of passive production
-    bountyClickCount: 25, // plus 25 clicks of power
-    minBountyFloor: 25, // Prevents early game inflation
+    baseDelayMs: 95000, // ~95 seconds average between appearances
+    delayVarianceMs: 25000,
+    flightDurationMs: 11000, // 11 seconds on screen
+    frenzyDurationSec: 12,
+    frenzyMultiplier: 2.5, // 2.5x during frenzy
+    bountyCpsSeconds: 25, // 25 seconds of passive production
+    bountyClickCount: 65, // +65 clicks of click power!
+    minBountyFloor: 50,
   },
 
   // --- ACHIEVEMENTS ---
   achievements: {
-    // Each achievement unlocked grants a permanent global +1% production boost
     perAchievementBonusMultiplier: 0.01,
   },
 
@@ -45,8 +44,7 @@ export const BALANCE = {
 
   // --- PRESTIGE (COSMIC ASCENSION) ---
   prestige: {
-    baseShardRequirement: 1000000, // 1 Million lifetime coins for 1st shard
-    unspentShardBonus: 0.02, // +2% all production per unspent cosmic shard
+    baseShardRequirement: 1000000, // 1 Million lifetime coins for 1st Rebirth
+    unspentShardBonus: 0.05, // +0.05x per Rebirth step
   },
 } as const;
-

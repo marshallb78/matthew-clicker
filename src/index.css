@@ -2,8 +2,8 @@
 
 @layer base {
   :root {
-    --bg-main: #0c0f1d;
-    --bg-side: #13172b;
+    --bg-main: #070a14;
+    --bg-side: #101528;
     --accent-yellow: #ffb703;
     --accent-cyan: #00f0ff;
     --accent-purple: #9d4edd;
@@ -29,62 +29,85 @@
 
 /* Subtle Film Noise Texture Overlay */
 .noise-overlay {
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.035'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E");
 }
 
-/* Capybara Clicker Style Bouncy 3D Buttons */
+/* Bouncy 3D Arcade Buttons */
 .btn-chunky {
-  transition: all 0.08s ease;
-  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.35);
+  transition: transform 0.08s cubic-bezier(0.22, 1, 0.36, 1), filter 0.12s ease, box-shadow 0.12s ease;
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.45);
 }
 
 .btn-chunky:hover:not(:disabled) {
-  filter: brightness(1.08);
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.45);
 }
 
 .btn-chunky:active:not(:disabled) {
-  transform: translateY(3px);
-  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+  transform: translateY(3px) scale(0.98);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
 }
 
-/* Float Up Coin Text Animation */
+/* Normal Float Up Coin Text Animation */
 @keyframes floatUpFade {
   0% {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(0.9);
+    transform: translate(-50%, -50%) scale(0.75) rotate(-3deg);
   }
-  30% {
-    transform: translate(-50%, -75%) scale(1.15);
+  25% {
+    opacity: 1;
+    transform: translate(-50%, -80%) scale(1.18) rotate(2deg);
   }
   100% {
     opacity: 0;
-    transform: translate(-50%, -140%) scale(0.95);
+    transform: translate(-50%, -155%) scale(0.92) rotate(0deg);
+  }
+}
+
+/* Critical Hit Explosive Pop Animation */
+@keyframes floatCritPop {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(0.5) rotate(-8deg);
+  }
+  20% {
+    opacity: 1;
+    transform: translate(-50%, -85%) scale(1.42) rotate(5deg);
+  }
+  40% {
+    transform: translate(-50%, -100%) scale(1.22) rotate(-3deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -175%) scale(1.0) rotate(0deg);
   }
 }
 
 .animate-float-coin {
-  animation: floatUpFade 0.85s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
+  animation: floatUpFade 0.82s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
 }
 
-/* Character Squash & Stretch Animation */
-@keyframes characterBounce {
+.animate-float-crit {
+  animation: floatCritPop 0.9s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
+}
+
+/* Shimmering Banner Gradient */
+@keyframes bannerShimmer {
   0% {
-    transform: scale(1, 1);
+    background-position: 0% 50%;
   }
-  35% {
-    transform: scale(1.14, 0.88);
-  }
-  70% {
-    transform: scale(0.92, 1.08);
+  50% {
+    background-position: 100% 50%;
   }
   100% {
-    transform: scale(1, 1);
+    background-position: 0% 50%;
   }
 }
 
-.animate-squash {
-  animation: characterBounce 0.25s ease-out;
-  transform-origin: 49.3% 50.1%;
+.animate-banner-shimmer {
+  background-size: 200% 200%;
+  animation: bannerShimmer 5s ease infinite;
 }
 
 /* Custom Scrollbar */
@@ -95,9 +118,9 @@
   background: rgba(15, 18, 35, 0.6);
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(45, 55, 85, 0.8);
+  background: rgba(56, 70, 110, 0.85);
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 240, 255, 0.5);
+  background: rgba(0, 240, 255, 0.6);
 }

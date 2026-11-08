@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GameState } from './types/game';
-import { loadGame, saveGame } from './utils/storage';
+import { loadGame, saveGame, performBetaWipeIfDue } from './utils/storage';
 import { equipSkin, getSkinById, checkAndApplyMilestoneUnlocks } from './data/skins';
 import { calculateOfflineEarnings, calculateCPS } from './utils/calculations';
 import {
@@ -8,7 +8,7 @@ import {
   isFridayBonusActive,
   evaluateMatthewStormState,
 } from './utils/scheduleEngine';
-import { MATTHEW_STORM_CONFIG } from './config/gameConfig';
+import { MATTHEW_STORM_CONFIG, BETA_RESET_CONFIG } from './config/gameConfig';
 import { subscribeToAuthChanges } from './firebase/auth';
 import { loadAndReconcileCloudSave, saveStateToCloud } from './firebase/cloudSave';
 import { updateLeaderboardEntry } from './firebase/leaderboard';
@@ -81,10 +81,34 @@ export function App() {
     }, 3500);
   };
 
-  // 1-second schedule ticker for Season, Friday 2×, and Matthew Storm waves
+  // 1-second schedule ticker for Season, Friday 2×, Matthew Storm waves, and Monday 1 AM Beta Reset
   useEffect(() => {
     const timer = setInterval(() => {
-      setNowMs(Date.now());
+      const currentNow = Date.now();
+      setNowMs(currentNow);
+
+      // Enforce Monday 1:00 AM Beta Reset live if player is currently online when 1:00 AM hits
+      if (
+        currentNow >= BETA_RESET_CONFIG.resetTimeMs &&
+        stateRef.current.lastBetaWipeId !== BETA_RESET_CONFIG.wipeId
+      ) {
+        const { state: wipedState, wiped } = performBetaWipeIfDue(stateRef.current, currentNow);
+        if (wiped) {
+          saveGame(wipedState);
+          setState(wipedState);
+          if (wipedState.cloudAccount) {
+            saveStateToCloud(
+              wipedState.cloudAccount.uid,
+              wipedState.cloudAccount.displayUsername,
+              wipedState
+            );
+          }
+          handleNotify(
+            '🚨 MONDAY 1:00 AM BETA RESET COMPLETE!',
+            'All accounts and progress have been wiped for the new Click-Power update!'
+          );
+        }
+      }
     }, 1000);
     return () => clearInterval(timer);
   }, []);
@@ -168,9 +192,10 @@ export function App() {
         stateRef.current
       );
       setState((prev) => {
+        const { state: checkedPrev } = performBetaWipeIfDue(prev, Date.now());
         const next: GameState = {
           ...merged,
-          coins: Math.max(prev.coins, merged.coins),
+          coins: Math.max(checkedPrev.coins, merged.coins),
           cloudAccount: {
             uid: profile.uid,
             username: profile.username,
