@@ -16,7 +16,7 @@ export const SKINS: Skin[] = [
     description: 'The original Matthew. Pure baseline swag.',
     perkDescription: 'Collectible Swag',
     image: './images/skins/classic_matthew.png',
-    fallbackImage: './assets/skins/existing/classic_matthew.svg',
+    fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'free',
       target: 0,
@@ -34,7 +34,7 @@ export const SKINS: Skin[] = [
     description: 'Down to his last crumpled dollar bills.',
     perkDescription: 'Collectible Swag',
     image: './images/skins/broke_matthew.png',
-    fallbackImage: './assets/skins/existing/classic_matthew.svg',
+    fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
       target: 1000,
@@ -52,7 +52,7 @@ export const SKINS: Skin[] = [
     category: 'existing',
     perkDescription: 'Collectible Swag',
     image: './images/skins/sad_matthew.png',
-    fallbackImage: './assets/skins/existing/sad_matthew.svg',
+    fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
       target: 50000,
@@ -70,7 +70,7 @@ export const SKINS: Skin[] = [
     description: 'Yawning through the late-night grind.',
     perkDescription: 'Collectible Swag',
     image: './images/skins/sleepy_matthew.png',
-    fallbackImage: './assets/skins/existing/sleepy_matthew.svg',
+    fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
       target: 2500000,
@@ -88,7 +88,7 @@ export const SKINS: Skin[] = [
     description: 'Fuming with pure competitive rage.',
     perkDescription: 'Collectible Swag',
     image: './images/skins/angry_matthew.png',
-    fallbackImage: './assets/skins/existing/angry_matthew.svg',
+    fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
       target: 150000000,
@@ -106,7 +106,7 @@ export const SKINS: Skin[] = [
     description: 'Crackling +999,999 electric lightning aura.',
     perkDescription: 'Collectible Swag',
     image: './images/skins/aura_matthew.png',
-    fallbackImage: './assets/skins/existing/aura_matthew.svg',
+    fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
       target: 25000000000,
@@ -124,7 +124,7 @@ export const SKINS: Skin[] = [
     description: 'Locked-in shades and unstoppable mogging.',
     perkDescription: 'Collectible Swag',
     image: './images/skins/sigma_matthew.png',
-    fallbackImage: './assets/skins/existing/sigma_matthew.svg',
+    fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
       target: 5000000000000,
@@ -142,7 +142,7 @@ export const SKINS: Skin[] = [
     description: 'Solid 24K gold flex.',
     perkDescription: 'Collectible Swag',
     image: './images/skins/golden_matthew.png',
-    fallbackImage: './assets/skins/existing/golden_matthew.svg',
+    fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
       target: 1e16,
@@ -160,7 +160,7 @@ export const SKINS: Skin[] = [
     description: 'Flawless crystalline diamond facets.',
     perkDescription: 'Collectible Swag',
     image: './images/skins/diamond_matthew.png',
-    fallbackImage: './assets/skins/existing/diamond_matthew.svg',
+    fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
       target: 1e20,
@@ -178,7 +178,7 @@ export const SKINS: Skin[] = [
     description: 'Cosmic nebula and starfield consciousness.',
     perkDescription: 'Collectible Swag',
     image: './images/skins/galaxy_matthew.png',
-    fallbackImage: './assets/skins/existing/galaxy_matthew.svg',
+    fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
       target: 1e24,
@@ -196,7 +196,7 @@ export const SKINS: Skin[] = [
     description: 'Sacred golden sun halo & royal crown deity.',
     perkDescription: 'Ultimate Bragging Rights',
     image: './images/skins/god_matthew.png',
-    fallbackImage: './assets/skins/existing/god_matthew.svg',
+    fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
       target: 1e29,
@@ -220,7 +220,7 @@ export const CHARACTER_SKINS: Skin[] = [
     description: 'SUPER SUPER RARE endgame character unlocked only by true decillionaires.',
     perkDescription: 'Ultra-Rare Flex',
     image: './images/skins/mathjew.png',
-    fallbackImage: './assets/skins/characters/mathjew_normal.svg',
+    fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
       target: 1e34,
@@ -243,7 +243,7 @@ export const CHAMPION_SKIN: Skin = {
   description: 'Awarded exclusively to the #1 Worldwide Season Leaderboard Winner.',
   perkDescription: '#1 World Champion Flex',
   image: './images/skins/champion_matthew.png',
-  fallbackImage: './assets/skins/champion/champion_matthew.svg',
+  fallbackImage: './images/skins/classic_matthew.png',
   milestone: {
     type: 'season_champion',
     target: 1,
@@ -271,7 +271,7 @@ export const MATTHEW_STORM_SKINS: Skin[] = [
     description: 'Uncanny golden grin from the depths of the Matthew Storm.',
     perkDescription: 'Live Event Exclusive',
     image: './images/skins/verity_matthew.png',
-    fallbackImage: './assets/skins/events/matthew-storm/storm_skin_1.svg',
+    fallbackImage: './images/skins/classic_matthew.png',
     gemCost: GEM_ECONOMY_CONFIG.stormSkinCostGems,
     isEventLimited: true,
     milestone: {
@@ -291,7 +291,7 @@ export const MATTHEW_STORM_SKINS: Skin[] = [
     description: 'Ancient carved wooden log anomaly awakened by the storm.',
     perkDescription: 'Live Event Exclusive',
     image: './images/skins/tung_tung_sahur.png',
-    fallbackImage: './assets/skins/events/matthew-storm/storm_skin_2.svg',
+    fallbackImage: './images/skins/classic_matthew.png',
     gemCost: GEM_ECONOMY_CONFIG.stormSkinCostGems,
     isEventLimited: true,
     milestone: {
@@ -311,7 +311,7 @@ export const MATTHEW_STORM_SKINS: Skin[] = [
     description: 'Maximum bark, maximum speed, unstoppable live-stream chaos.',
     perkDescription: 'Live Event Exclusive',
     image: './images/skins/ishowspeed_matthew.png',
-    fallbackImage: './assets/skins/events/matthew-storm/storm_skin_3.svg',
+    fallbackImage: './images/skins/classic_matthew.png',
     gemCost: GEM_ECONOMY_CONFIG.stormSkinCostGems,
     isEventLimited: true,
     milestone: {
@@ -331,7 +331,7 @@ export const MATTHEW_STORM_SKINS: Skin[] = [
     description: 'I Just Bought Every Matthew In The World For 50 Gems!',
     perkDescription: 'Live Event Exclusive',
     image: './images/skins/mrbeast_matthew.png',
-    fallbackImage: './assets/skins/events/matthew-storm/storm_skin_4.svg',
+    fallbackImage: './images/skins/classic_matthew.png',
     gemCost: GEM_ECONOMY_CONFIG.stormSkinCostGems,
     isEventLimited: true,
     milestone: {
@@ -351,7 +351,7 @@ export const MATTHEW_STORM_SKINS: Skin[] = [
     description: 'The biggest clicks, the best clicks, nobody clicks like this.',
     perkDescription: 'Live Event Exclusive',
     image: './images/skins/donald_trump_matthew.png',
-    fallbackImage: './assets/skins/events/matthew-storm/storm_skin_5.svg',
+    fallbackImage: './images/skins/classic_matthew.png',
     gemCost: GEM_ECONOMY_CONFIG.stormSkinCostGems,
     isEventLimited: true,
     milestone: {

@@ -10,7 +10,7 @@ import {
   LiveMultiplierOptions,
 } from '../utils/calculations';
 import { MatthewStormState } from '../utils/scheduleEngine';
-import { MATTHEW_STORM_CONFIG, BETA_RESET_CONFIG } from '../config/gameConfig';
+import { MATTHEW_STORM_CONFIG } from '../config/gameConfig';
 import { BALANCE } from '../data/balance';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
@@ -26,7 +26,6 @@ import {
   Zap,
   Gem,
   ShoppingBag,
-  AlertTriangle,
   Infinity as InfinityIcon,
 } from 'lucide-react';
 
@@ -217,28 +216,16 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
     );
   };
 
-  const handleClick = (
-    e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>
-  ) => {
-    e.preventDefault();
-
+  const performMatthewClick = (rawX?: number, rawY?: number) => {
     recentClickTimestampsRef.current.push(Date.now());
 
     const rect = characterRef.current?.getBoundingClientRect();
-    let clientX = 0;
-    let clientY = 0;
-
-    if ('touches' in e && e.touches.length > 0) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    } else if ('clientX' in e) {
-      clientX = (e as React.MouseEvent<HTMLDivElement>).clientX;
-      clientY = (e as React.MouseEvent<HTMLDivElement>).clientY;
-    }
+    let clientX = rawX || 0;
+    let clientY = rawY || 0;
 
     if ((!clientX || !clientY) && rect) {
-      clientX = rect.left + rect.width / 2;
-      clientY = rect.top + rect.height / 2;
+      clientX = rect.left + rect.width / 2 + (Math.random() - 0.5) * 36;
+      clientY = rect.top + rect.height / 2 + (Math.random() - 0.5) * 36;
     }
 
     const isCrit = Math.random() < critChance;
@@ -274,6 +261,49 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
     }, 850);
 
     onEarnCoins(earned, true, isCrit);
+  };
+
+  const performClickRef = useRef(performMatthewClick);
+  performClickRef.current = performMatthewClick;
+
+  // Spacebar support: pressing Spacebar acts as a Matthew click!
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' && e.key !== ' ') return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      if (e.repeat) return;
+      performClickRef.current();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  const handleClick = (
+    e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>
+  ) => {
+    e.preventDefault();
+
+    let clientX = 0;
+    let clientY = 0;
+
+    if ('touches' in e && e.touches.length > 0) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else if ('clientX' in e) {
+      clientX = (e as React.MouseEvent<HTMLDivElement>).clientX;
+      clientY = (e as React.MouseEvent<HTMLDivElement>).clientY;
+    }
+
+    performMatthewClick(clientX, clientY);
   };
 
   // Clickable Giant Rare Matthew during Storm Waves (Image ONLY, disappears after 7s)
@@ -354,10 +384,6 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   const zoomScale = 1 + (zoomSeconds / OVERDRIVE_TARGET_SECONDS) * 0.72;
   const zoomPercent = Math.min(100, Math.floor((zoomSeconds / OVERDRIVE_TARGET_SECONDS) * 100));
 
-  const secondsUntilBetaReset = Math.max(
-    0,
-    Math.floor((BETA_RESET_CONFIG.resetTimeMs - Date.now()) / 1000)
-  );
   const comboPercent = Math.min(
     100,
     Math.floor(((state.combo || 0) / BALANCE.click.comboMax) * 100)
@@ -373,19 +399,8 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
         stormWaveActive={Boolean(currentWave)}
       />
 
-      {/* 2. TOP BAR: BETA RESET ANNOUNCEMENT, NAVIGATION, ACCOUNT, LEADERBOARD, GEMS & LIVE BANNERS */}
+      {/* 2. TOP BAR: NAVIGATION, ACCOUNT, LEADERBOARD, GEMS & LIVE BANNERS */}
       <div className="w-full flex flex-col gap-2 z-20">
-        {/* TOP BETA RESET ANNOUNCEMENT BANNER */}
-        <div className="w-full px-3 py-1.5 rounded-2xl bg-gradient-to-r from-rose-600/95 via-amber-500/95 to-rose-600/95 animate-banner-shimmer border-2 border-yellow-200/80 shadow-[0_0_24px_rgba(244,63,94,0.45)] flex items-center justify-center gap-2 text-center">
-          <AlertTriangle className="w-4 h-4 text-slate-950 shrink-0 animate-bounce" />
-          <span className="text-[11px] sm:text-xs font-black text-slate-950 uppercase tracking-wide">
-            {secondsUntilBetaReset > 0
-              ? `BETA ANNOUNCEMENT: Everyone's accounts & progress will be reset TODAY at 6:20 PM! • Reset in ${formatTime(
-                  secondsUntilBetaReset
-                )}`
-              : `6:20 PM BETA RESET ACTIVE: All accounts & progress have been freshly reset for the Click-Power update!`}
-          </span>
-        </div>
         <div className="w-full flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
             <button
