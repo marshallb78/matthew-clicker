@@ -380,10 +380,10 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
           <AlertTriangle className="w-4 h-4 text-slate-950 shrink-0 animate-bounce" />
           <span className="text-[11px] sm:text-xs font-black text-slate-950 uppercase tracking-wide">
             {secondsUntilBetaReset > 0
-              ? `BETA ANNOUNCEMENT: Everyone's accounts & progress will be reset at 1:00 AM tomorrow (Monday)! • Reset in ${formatTime(
+              ? `BETA ANNOUNCEMENT: Everyone's accounts & progress will be reset TODAY at 6:20 PM! • Reset in ${formatTime(
                   secondsUntilBetaReset
                 )}`
-              : `MONDAY 1:00 AM BETA RESET ACTIVE: All accounts & progress have been freshly reset for the Click-Power update!`}
+              : `6:20 PM BETA RESET ACTIVE: All accounts & progress have been freshly reset for the Click-Power update!`}
           </span>
         </div>
         <div className="w-full flex items-center justify-between flex-wrap gap-2">

@@ -12,14 +12,21 @@ export const TIMEZONE_CONFIG = {
   utcOffsetHoursStandard: -5, // EST (November is Standard Time)
 };
 
+const NOV_8_620PM_MS = Date.parse('2026-11-08T18:20:00-05:00');
+const APR_12_620PM_MS = Date.parse('2026-04-12T18:20:00-04:00');
+
 export const BETA_RESET_CONFIG = {
-  /** Unique identifier for the Monday 1:00 AM global beta reset */
-  wipeId: 'monday_nov_9_2026_1am_wipe_v1',
-  /** Monday, November 9, 2026 at 1:00 AM EST */
-  resetIso: '2026-11-09T01:00:00-05:00',
-  resetTimeMs: Date.parse('2026-11-09T01:00:00-05:00'),
+  /** Unique identifier for the 6:20 PM today global beta reset */
+  wipeId: 'today_nov_8_2026_620pm_wipe_v1',
+  /** Today at 6:20 PM Eastern */
+  resetIso: '2026-11-08T18:20:00-05:00',
+  get resetTimeMs(): number {
+    return Date.now() < Date.parse('2026-10-01T00:00:00-05:00')
+      ? APR_12_620PM_MS
+      : NOV_8_620PM_MS;
+  },
   announcementText:
-    "BETA ANNOUNCEMENT: Everyone's accounts & progress will be reset at 1:00 AM tomorrow (Monday)!",
+    "BETA ANNOUNCEMENT: Everyone's accounts & progress will be reset TODAY at 6:20 PM!",
 };
 
 export const SEASON_CONFIG = {
