@@ -7,12 +7,10 @@ import {
   User,
 } from 'firebase/auth';
 import {
-  doc,
-  getDoc,
-  runTransaction,
-  serverTimestamp,
-} from 'firebase/firestore';
-import { getFirebaseServices } from './config';
+  getFirebaseServices,
+  firestoreRestGetDoc,
+  firestoreRestSetDoc,
+} from './config';
 
 export interface PlayerAccount {
   uid: string;
@@ -61,16 +59,15 @@ export async function registerWithUsername(
   const passwordErr = validatePasswordFormat(password);
   if (passwordErr) throw new Error(passwordErr);
 
-  const { auth, db, error } = getFirebaseServices();
-  if (!auth || !db) {
+  const { auth, error } = getFirebaseServices();
+  if (!auth) {
     throw new Error(error || 'Firebase is not available in this environment.');
   }
 
   const cleanDisplayUsername = username.trim();
   const normalized = normalizeUsername(cleanDisplayUsername);
-  const usernameDocRef = doc(db, 'usernames', normalized);
-
   const internalEmail = usernameToInternalAuthEmail(normalized);
+
   let credential;
   try {
     credential = await createUserWithEmailAndPassword(auth, internalEmail, password);
@@ -88,24 +85,22 @@ export async function registerWithUsername(
 
   const user = credential.user;
 
+  // Non-blocking username registry write + profile displayName update
   try {
-    await runTransaction(db, async (tx) => {
-      const snap = await tx.get(usernameDocRef);
-      if (snap.exists() && snap.data()?.uid !== user.uid) {
-        throw new Error(`Username "${cleanDisplayUsername}" is already claimed.`);
-      }
-      tx.set(usernameDocRef, {
-        uid: user.uid,
-        username: cleanDisplayUsername,
-        normalizedUsername: normalized,
-        createdAt: serverTimestamp(),
-      });
-    });
+    await Promise.race([
+      updateProfile(user, { displayName: cleanDisplayUsername }),
+      new Promise((resolve) => setTimeout(resolve, 2000)),
+    ]);
   } catch {
-    // Continue even if username index write is delayed
+    // ignore
   }
 
-  await updateProfile(user, { displayName: cleanDisplayUsername });
+  firestoreRestSetDoc(`usernames/${normalized}`, {
+    uid: user.uid,
+    username: cleanDisplayUsername,
+    normalizedUsername: normalized,
+    createdAt: new Date(),
+  }).catch(() => {});
 
   return {
     uid: user.uid,
@@ -128,8 +123,8 @@ export async function loginWithUsername(
     throw new Error('Please enter your password.');
   }
 
-  const { auth, db, error } = getFirebaseServices();
-  if (!auth || !db) {
+  const { auth, error } = getFirebaseServices();
+  if (!auth) {
     throw new Error(error || 'Firebase is not available.');
   }
 
@@ -161,12 +156,6 @@ export async function loginWithUsername(
   }
 }
 
-/**
- * Unified Sign In / Create Account:
- * Checks if the username exists; if it exists, signs the player in.
- * If it does not exist yet, automatically creates the account and signs them in!
- * Includes a local-credential fallback if Firebase Auth Email/Password is not yet enabled on the console.
- */
 const LOCAL_ACCOUNTS_KEY = 'matthew_clicker_local_accounts_v1';
 
 function authenticateLocalFallback(
@@ -219,6 +208,13 @@ function authenticateLocalFallback(
   };
 }
 
+/**
+ * Unified Sign In / Create Account:
+ * 1. Attempts Firebase Auth `signInWithEmailAndPassword` directly first (zero Firestore quota needed!).
+ * 2. If the user does not exist yet, creates the account via `createUserWithEmailAndPassword`.
+ * 3. If the account already exists (`auth/email-already-in-use`), throws a clear wrong-password error.
+ * 4. Never hangs if Firestore writes are throttled.
+ */
 export async function authenticateUnified(
   username: string,
   password: string
@@ -232,55 +228,71 @@ export async function authenticateUnified(
   const cleanDisplayUsername = username.trim();
   const normalized = normalizeUsername(cleanDisplayUsername);
 
-  const { auth, db } = getFirebaseServices();
-  if (!auth || !db) {
+  const { auth } = getFirebaseServices();
+  if (!auth) {
     return authenticateLocalFallback(cleanDisplayUsername, normalized, password);
   }
 
-  const usernameDocRef = doc(db, 'usernames', normalized);
-
-  // Check if username document exists in Firestore (with fast timeout)
-  let usernameExistsInDb = false;
-  try {
-    const existingSnap = await Promise.race([
-      getDoc(usernameDocRef),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
-    ]);
-    usernameExistsInDb = Boolean(existingSnap && existingSnap.exists());
-  } catch {
-    usernameExistsInDb = false;
-  }
-
-  if (usernameExistsInDb) {
-    try {
-      const account = await loginWithUsername(cleanDisplayUsername, password);
-      return { account, isNewAccount: false };
-    } catch (err: any) {
-      if (String(err?.message || '').includes('Invalid username or password')) {
-        throw err;
-      }
-      return authenticateLocalFallback(cleanDisplayUsername, normalized, password);
-    }
-  }
-
-  // Otherwise try creating the account first; if Firebase Auth says email-already-in-use, try signing in!
   const internalEmail = usernameToInternalAuthEmail(normalized);
+
+  // Step 1: Try signing in directly with Firebase Auth (fastest path, 0 Firestore reads/writes)
   try {
-    const credential = await createUserWithEmailAndPassword(auth, internalEmail, password);
-    const user = credential.user;
+    const signInCred = await signInWithEmailAndPassword(auth, internalEmail, password);
+    const user = signInCred.user;
+    let displayUsername = user.displayName || cleanDisplayUsername;
+
+    if (!user.displayName) {
+      try {
+        const docSnap = await firestoreRestGetDoc(`usernames/${normalized}`, false, 2000);
+        if (docSnap.exists && typeof docSnap.data.username === 'string') {
+          displayUsername = docSnap.data.username;
+        }
+      } catch {
+        // use cleanDisplayUsername
+      }
+    }
+
+    return {
+      account: {
+        uid: user.uid,
+        username: displayUsername,
+        normalizedUsername: normalized,
+      },
+      isNewAccount: false,
+    };
+  } catch (signInErr: any) {
+    const code = signInErr?.code || '';
+    if (code === 'auth/wrong-password') {
+      throw new Error('Invalid username or password.');
+    }
+    if (code === 'auth/too-many-requests') {
+      throw new Error('Too many failed attempts. Please wait a moment and try again.');
+    }
+    // If invalid-credential or user-not-found, check if we can register this username as a new account
+  }
+
+  // Step 2: Try creating the account in Firebase Auth
+  try {
+    const createCred = await createUserWithEmailAndPassword(auth, internalEmail, password);
+    const user = createCred.user;
+
     try {
-      await runTransaction(db, async (tx) => {
-        tx.set(usernameDocRef, {
-          uid: user.uid,
-          username: cleanDisplayUsername,
-          normalizedUsername: normalized,
-          createdAt: serverTimestamp(),
-        });
-      });
+      await Promise.race([
+        updateProfile(user, { displayName: cleanDisplayUsername }),
+        new Promise((resolve) => setTimeout(resolve, 2000)),
+      ]);
     } catch {
       // ignore
     }
-    await updateProfile(user, { displayName: cleanDisplayUsername });
+
+    // Non-blocking write to usernames registry
+    firestoreRestSetDoc(`usernames/${normalized}`, {
+      uid: user.uid,
+      username: cleanDisplayUsername,
+      normalizedUsername: normalized,
+      createdAt: new Date(),
+    }).catch(() => {});
+
     return {
       account: {
         uid: user.uid,
@@ -289,20 +301,33 @@ export async function authenticateUnified(
       },
       isNewAccount: true,
     };
-  } catch (err: any) {
-    if (err?.code === 'auth/email-already-in-use') {
-      const account = await loginWithUsername(cleanDisplayUsername, password);
-      return { account, isNewAccount: false };
+  } catch (createErr: any) {
+    const code = createErr?.code || '';
+    if (code === 'auth/email-already-in-use') {
+      // Account exists in Firebase Auth, which means the password in Step 1 was wrong!
+      throw new Error('Invalid username or password.');
     }
-    // If Firebase Console Email/Password provider isn't enabled yet or network is blocked, fall back seamlessly
-    return authenticateLocalFallback(cleanDisplayUsername, normalized, password);
+    if (code === 'auth/too-many-requests') {
+      throw new Error('Too many failed attempts. Please wait a moment and try again.');
+    }
+    if (code === 'auth/operation-not-allowed' || code === 'auth/network-request-failed') {
+      return authenticateLocalFallback(cleanDisplayUsername, normalized, password);
+    }
+    throw new Error(createErr?.message || 'Authentication failed. Please try again.');
   }
 }
 
 export async function logoutPlayer(): Promise<void> {
   const { auth } = getFirebaseServices();
   if (auth) {
-    await signOut(auth);
+    try {
+      await Promise.race([
+        signOut(auth),
+        new Promise((resolve) => setTimeout(resolve, 2000)),
+      ]);
+    } catch {
+      // ignore
+    }
   }
 }
 

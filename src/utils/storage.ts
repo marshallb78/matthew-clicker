@@ -397,24 +397,10 @@ export function sanitizeAndValidateGameState(parsed: any): GameState {
  */
 export function performBetaWipeIfDue(
   state: GameState,
-  nowMs: number = Date.now()
+  _nowMs: number = Date.now()
 ): { state: GameState; wiped: boolean } {
-  if (nowMs < BETA_RESET_CONFIG.resetTimeMs) {
-    return { state, wiped: false };
-  }
-  if (state.lastBetaWipeId === BETA_RESET_CONFIG.wipeId) {
-    return { state, wiped: false };
-  }
-
-  const fresh = getDefaultGameState();
-  const wipedState: GameState = {
-    ...fresh,
-    lastBetaWipeId: BETA_RESET_CONFIG.wipeId,
-    cloudAccount: state.cloudAccount || null,
-    settings: state.settings || fresh.settings,
-    lastSaveTime: nowMs,
-  };
-  return { state: wipedState, wiped: true };
+  // Beta reset is complete; never reset any player's local or cloud progress.
+  return { state, wiped: false };
 }
 
 export function loadGame(): GameState {

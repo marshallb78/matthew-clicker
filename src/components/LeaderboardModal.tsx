@@ -4,8 +4,10 @@ import {
   fetchWorldwideLeaderboard,
   fetchPlayerLeaderboardEntry,
   updateLeaderboardEntry,
+  sortLeaderboardDeterministically,
   LeaderboardEntry,
 } from '../firebase/leaderboard';
+import { getAscensionMultiplier } from '../data/prestige';
 import { CHAMPION_SKIN, getSkinById } from '../data/skins';
 import { formatCoins, formatTime } from '../utils/formatters';
 import { Trophy, Crown, RefreshCw, X, UploadCloud, ArrowLeft, Eye } from 'lucide-react';
@@ -40,19 +42,58 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
   const loadLeaderboard = async () => {
     setLoading(true);
     try {
+      // Fire background leaderboard publish non-blockingly so fetching scores is always instant
       if (state.cloudAccount) {
-        await updateLeaderboardEntry(
+        updateLeaderboardEntry(
           state.cloudAccount.uid,
           state.cloudAccount.displayUsername,
           state,
           seasonId
-        );
+        ).catch(() => {});
       }
+
       const list = await fetchWorldwideLeaderboard(seasonId, 50);
-      setEntries(list);
+
       if (state.cloudAccount) {
-        const mine = await fetchPlayerLeaderboardEntry(state.cloudAccount.uid, seasonId);
-        setPlayerEntry(mine);
+        const localScore = Math.max(
+          0,
+          Math.floor(Math.max(state.seasonalScore || 0, state.lifetimeCoins || 0))
+        );
+        const liveMine: LeaderboardEntry = {
+          uid: state.cloudAccount.uid,
+          username: state.cloudAccount.displayUsername,
+          seasonalScore: localScore,
+          lifetimeCoins: Math.floor(state.lifetimeCoins || 0),
+          totalClicks: Math.floor(state.clicks || 0),
+          rebirthCount: state.prestigeCount || 0,
+          ascensionMultiplier: getAscensionMultiplier(state.prestigeShards),
+          equippedSkin: state.equippedSkin || 'classic_matthew',
+          unlockedSkins:
+            Array.isArray(state.unlockedSkins) && state.unlockedSkins.length > 0
+              ? state.unlockedSkins
+              : ['classic_matthew'],
+          updatedAtMs: Date.now(),
+        };
+
+        // Ensure the player's latest live stats are reflected in the displayed leaderboard even during write cooldown
+        const existingIdx = list.findIndex((e) => e.uid === state.cloudAccount?.uid);
+        if (existingIdx >= 0) {
+          if (liveMine.seasonalScore >= list[existingIdx].seasonalScore) {
+            list[existingIdx] = liveMine;
+          }
+        } else {
+          list.push(liveMine);
+        }
+
+        const sorted = sortLeaderboardDeterministically(list).slice(0, 50);
+        setEntries(sorted);
+
+        const cloudMine = await fetchPlayerLeaderboardEntry(state.cloudAccount.uid, seasonId);
+        setPlayerEntry(
+          cloudMine && cloudMine.seasonalScore > liveMine.seasonalScore ? cloudMine : liveMine
+        );
+      } else {
+        setEntries(list);
       }
     } finally {
       setLoading(false);

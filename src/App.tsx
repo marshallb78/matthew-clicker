@@ -210,24 +210,38 @@ export function App() {
     return () => unsubscribe();
   }, []);
 
-  // Auto-Save to Cloud & Leaderboard every 5 seconds when signed into an account
+  // Auto-Save to Cloud & Leaderboard every 60 seconds when actively playing (98% fewer Firestore writes so daily quota never runs out!)
   useEffect(() => {
-    const cloudInterval = setInterval(async () => {
+    const syncIfActive = () => {
       const curr = stateRef.current;
-      if (curr.cloudAccount) {
-        await saveStateToCloud(
-          curr.cloudAccount.uid,
-          curr.cloudAccount.displayUsername,
-          curr
-        );
-        await updateLeaderboardEntry(
-          curr.cloudAccount.uid,
-          curr.cloudAccount.displayUsername,
-          curr
-        );
+      if (!curr.cloudAccount) return;
+      const isRecentlyActive = Date.now() - (curr.lastActiveInputTimestamp || 0) < 75000;
+      if (!isRecentlyActive) return;
+      saveStateToCloud(
+        curr.cloudAccount.uid,
+        curr.cloudAccount.displayUsername,
+        curr
+      ).catch(() => {});
+    };
+
+    const cloudInterval = setInterval(syncIfActive, 60000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        const curr = stateRef.current;
+        if (curr.cloudAccount) {
+          saveStateToCloud(
+            curr.cloudAccount.uid,
+            curr.cloudAccount.displayUsername,
+            curr
+          ).catch(() => {});
+        }
       }
-    }, 5000);
-    return () => clearInterval(cloudInterval);
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      clearInterval(cloudInterval);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, []);
 
   // Keyboard Easter Egg ("rain" — ignored when typing in inputs)

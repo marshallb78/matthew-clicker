@@ -27,8 +27,13 @@ import {
   GEM_ECONOMY_CONFIG,
   MATTHEW_STORM_CONFIG,
   FRIDAY_BONUS_CONFIG,
-  BETA_RESET_CONFIG,
 } from '../src/config/gameConfig';
+import {
+  encodeFirestoreDocument,
+  decodeFirestoreFields,
+  isCloudWriteCoolingDown,
+  markCloudWriteQuotaExceeded,
+} from '../src/firebase/config';
 import {
   isFridayBonusActive,
   evaluateMatthewStormState,
@@ -277,8 +282,8 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
     });
   });
 
-  describe('Monday 1:00 AM Beta Reset Enforcement', () => {
-    it('wipes all progress (including guests and accounts) once Monday 1:00 AM hits and only wipes once', () => {
+  describe('Data Preservation & Non-Hanging Firestore REST Serialization', () => {
+    it('never resets player progress or accounts and encodes/decodes Firestore documents accurately up to Decillions', () => {
       state.coins = 500000000;
       state.lifetimeCoins = 500000000;
       state.unlockedSkins = ['classic_matthew', 'sigma_matthew', 'god_matthew'];
@@ -288,27 +293,37 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
       state.prestigeShards = 15;
       state.lastBetaWipeId = null;
 
-      // Before Monday 1:00 AM: no wipe
-      const preWipe = performBetaWipeIfDue(state, BETA_RESET_CONFIG.resetTimeMs - 60000);
-      expect(preWipe.wiped).toBe(false);
-      expect(preWipe.state.coins).toBe(500000000);
+      // Verify performBetaWipeIfDue never wipes or resets any player's data
+      const checkResult = performBetaWipeIfDue(state, Date.now() + 99999999);
+      expect(checkResult.wiped).toBe(false);
+      expect(checkResult.state.coins).toBe(500000000);
+      expect(checkResult.state.lifetimeCoins).toBe(500000000);
+      expect(checkResult.state.gems).toBe(95);
+      expect(checkResult.state.prestigeCount).toBe(8);
+      expect(checkResult.state.unlockedSkins).toContain('god_matthew');
 
-      // At/After Monday 1:00 AM: full progress wipe
-      const postWipe = performBetaWipeIfDue(state, BETA_RESET_CONFIG.resetTimeMs + 1000);
-      expect(postWipe.wiped).toBe(true);
-      expect(postWipe.state.coins).toBe(0);
-      expect(postWipe.state.lifetimeCoins).toBe(0);
-      expect(postWipe.state.gems).toBe(0);
-      expect(postWipe.state.prestigeCount).toBe(0);
-      expect(postWipe.state.unlockedSkins).toEqual(['classic_matthew']);
-      expect(postWipe.state.equippedSkin).toBe('classic_matthew');
-      expect(postWipe.state.lastBetaWipeId).toBe(BETA_RESET_CONFIG.wipeId);
+      // Verify Firestore REST encoding/decoding for standard and huge (Decillion) numbers & nested maps
+      const sampleDoc = {
+        uid: 'test_uid_123',
+        username: 'Marshallb78',
+        seasonalScore: 5e35,
+        rebirthCount: 12,
+        unlockedSkins: ['classic_matthew', 'aura_matthew'],
+        upgrades: { finger_exercise: 25, energy_coffee: 10 },
+      };
+      const encoded = encodeFirestoreDocument(sampleDoc);
+      const decoded = decodeFirestoreFields(encoded.fields);
+      expect(decoded.uid).toBe('test_uid_123');
+      expect(decoded.username).toBe('Marshallb78');
+      expect(decoded.seasonalScore).toBe(5e35);
+      expect(decoded.rebirthCount).toBe(12);
+      expect(decoded.unlockedSkins).toEqual(['classic_matthew', 'aura_matthew']);
+      expect(decoded.upgrades).toEqual({ finger_exercise: 25, energy_coffee: 10 });
 
-      // Subsequent logins after wipe do not wipe new post-1AM progress
-      postWipe.state.coins = 12345;
-      const secondCheck = performBetaWipeIfDue(postWipe.state, BETA_RESET_CONFIG.resetTimeMs + 90000);
-      expect(secondCheck.wiped).toBe(false);
-      expect(secondCheck.state.coins).toBe(12345);
+      // Verify Write Circuit Breaker trips cleanly without throwing
+      expect(isCloudWriteCoolingDown()).toBe(false);
+      markCloudWriteQuotaExceeded();
+      expect(isCloudWriteCoolingDown()).toBe(true);
     });
   });
 });

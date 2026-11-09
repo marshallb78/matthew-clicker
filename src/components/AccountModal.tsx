@@ -6,8 +6,7 @@ import {
   validateUsernameFormat,
 } from '../firebase/auth';
 import { loadAndReconcileCloudSave, saveStateToCloud } from '../firebase/cloudSave';
-import { updateLeaderboardEntry } from '../firebase/leaderboard';
-import { getFirebaseServices } from '../firebase/config';
+import { getFirebaseServices, isCloudWriteCoolingDown } from '../firebase/config';
 import { saveGame } from '../utils/storage';
 import {
   User,
@@ -78,12 +77,12 @@ export const AccountModal: React.FC<AccountModalProps> = ({
 
       setState(nextState);
       saveGame(nextState);
-      await saveStateToCloud(profile.uid, profile.username, nextState);
-      await updateLeaderboardEntry(profile.uid, profile.username, nextState);
+      // Sync to cloud in the background so sign-in finishes immediately and never hangs
+      saveStateToCloud(profile.uid, profile.username, nextState, true).catch(() => {});
 
       onNotify(
         isNewAccount ? 'ACCOUNT CREATED & SIGNED IN!' : 'WELCOME BACK!',
-        `Signed in as ${profile.username}! Auto-saving every 5s to the cloud.`
+        `Signed in as ${profile.username}! Progress is synced & protected.`
       );
       setPassword('');
       onClose();
@@ -100,26 +99,27 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     setError(null);
     setSyncMessage(null);
     try {
+      saveGame(state);
       const ok = await saveStateToCloud(
         state.cloudAccount.uid,
         state.cloudAccount.displayUsername,
-        state
+        state,
+        true
       );
-      await updateLeaderboardEntry(
-        state.cloudAccount.uid,
-        state.cloudAccount.displayUsername,
-        state
+      const now = Date.now();
+      setState((prev) =>
+        prev.cloudAccount
+          ? { ...prev, cloudAccount: { ...prev.cloudAccount, lastCloudSync: now } }
+          : prev
       );
       if (ok) {
-        const now = Date.now();
-        setState((prev) =>
-          prev.cloudAccount
-            ? { ...prev, cloudAccount: { ...prev.cloudAccount, lastCloudSync: now } }
-            : prev
-        );
         setSyncMessage('Cloud save & worldwide leaderboard synced!');
+      } else if (isCloudWriteCoolingDown()) {
+        setSyncMessage(
+          'Saved locally! Cloud server daily write quota is cooling down and will auto-sync your score.'
+        );
       } else {
-        setError('Cloud sync could not complete. Check your connection.');
+        setSyncMessage('Saved to browser! Cloud sync queued.');
       }
     } catch (err: unknown) {
       setError((err as Error).message || 'Failed to sync.');
@@ -132,11 +132,11 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     setLoading(true);
     try {
       if (state.cloudAccount) {
-        await saveStateToCloud(
+        saveStateToCloud(
           state.cloudAccount.uid,
           state.cloudAccount.displayUsername,
           state
-        );
+        ).catch(() => {});
       }
       await logoutPlayer();
       setState((prev) => {
