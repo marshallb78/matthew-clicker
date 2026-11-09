@@ -45,10 +45,22 @@ export async function loadAndReconcileCloudSave(
   };
 
   try {
-    [userSnap, seasonSnap] = await Promise.all([
+    const [uDoc, sDoc, lbDoc] = await Promise.all([
       firestoreRestGetDoc(`users/${uid}`, true, 3500),
       firestoreRestGetDoc(`users/${uid}/seasons/${activeSeason.seasonId}`, true, 3500),
+      firestoreRestGetDoc(`leaderboards/${activeSeason.seasonId}/entries/${uid}`, false, 3500),
     ]);
+    userSnap = uDoc;
+    // Merge any newer fields from the 1-doc leaderboard snapshot into seasonSnap
+    const lbData = lbDoc.exists ? lbDoc.data : {};
+    const sData = sDoc.exists ? sDoc.data : {};
+    const lbLifetime = typeof lbData.lifetimeCoins === 'number' ? lbData.lifetimeCoins : 0;
+    const sLifetime = typeof sData.lifetimeCoins === 'number' ? sData.lifetimeCoins : 0;
+    seasonSnap = {
+      exists: sDoc.exists || lbDoc.exists,
+      id: activeSeason.seasonId,
+      data: lbLifetime > sLifetime ? { ...sData, ...lbData } : { ...lbData, ...sData },
+    };
   } catch (err) {
     console.warn('Cloud profile read skipped/offline, keeping local state:', err);
     return localState;

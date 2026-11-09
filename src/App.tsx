@@ -210,12 +210,25 @@ export function App() {
     return () => unsubscribe();
   }, []);
 
-  // Auto-Save to Cloud & Leaderboard every 60 seconds when actively playing (98% fewer Firestore writes so daily quota never runs out!)
+  // Fast 25-second 1-document Leaderboard + Progress sync while actively playing,
+  // plus 5-minute deep profile backup & automatic sync on tab close/hide.
   useEffect(() => {
-    const syncIfActive = () => {
+    const fastLeaderboardSync = () => {
       const curr = stateRef.current;
       if (!curr.cloudAccount) return;
-      const isRecentlyActive = Date.now() - (curr.lastActiveInputTimestamp || 0) < 75000;
+      const isRecentlyActive = Date.now() - (curr.lastActiveInputTimestamp || 0) < 30000;
+      if (!isRecentlyActive) return;
+      updateLeaderboardEntry(
+        curr.cloudAccount.uid,
+        curr.cloudAccount.displayUsername,
+        curr
+      ).catch(() => {});
+    };
+
+    const deepProfileBackup = () => {
+      const curr = stateRef.current;
+      if (!curr.cloudAccount) return;
+      const isRecentlyActive = Date.now() - (curr.lastActiveInputTimestamp || 0) < 310000;
       if (!isRecentlyActive) return;
       saveStateToCloud(
         curr.cloudAccount.uid,
@@ -224,7 +237,9 @@ export function App() {
       ).catch(() => {});
     };
 
-    const cloudInterval = setInterval(syncIfActive, 60000);
+    const fastInterval = setInterval(fastLeaderboardSync, 25000);
+    const deepInterval = setInterval(deepProfileBackup, 300000);
+
     const onVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
         const curr = stateRef.current;
@@ -239,7 +254,8 @@ export function App() {
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
-      clearInterval(cloudInterval);
+      clearInterval(fastInterval);
+      clearInterval(deepInterval);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, []);

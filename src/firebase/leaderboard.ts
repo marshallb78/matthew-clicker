@@ -19,17 +19,40 @@ export interface LeaderboardEntry {
   equippedSkin: string;
   unlockedSkins: string[];
   updatedAtMs: number;
+  // Optional embedded cloud save fields so a single 1-doc leaderboard write also backs up player progress!
+  coins?: number;
+  prestigeShards?: number;
+  lifetimePrestigeShards?: number;
+  gems?: number;
+  lifetimeGems?: number;
+  upgrades?: Record<string, number>;
+  claimedQuests?: string[];
+  unlockedAchievements?: string[];
 }
 
-// In-memory deduplication cache so we never waste daily Firestore writes when stats haven't changed
+// In-memory deduplication cache so we never waste daily Firestore writes when stats haven't meaningfully changed
 const lastPublishedSnapshotByUid = new Map<
   string,
-  { score: number; rebirths: number; skin: string; skinsCount: number; publishedAtMs: number }
+  {
+    score: number;
+    rebirths: number;
+    skin: string;
+    skinsCount: number;
+    publishedAtMs: number;
+  }
 >();
 
+// 15-second read cache for fetchWorldwideLeaderboard so spamming Refresh never exhausts the 50,000 daily read quota
+let cachedLeaderboardSeasonId = '';
+let cachedLeaderboardList: LeaderboardEntry[] | null = null;
+let cachedLeaderboardFetchedAtMs = 0;
+const LEADERBOARD_READ_CACHE_TTL_MS = 15000; // 15s cache
+
 /**
- * Publishes the player's validated seasonal score, stats, and unlocked skins to the public season leaderboard.
- * Uses smart deduplication and our stateless REST circuit breaker so it never hangs or wastes write quota.
+ * Publishes the player's validated seasonal score, stats, unlocked skins, AND embedded progress snapshot
+ * to the public season leaderboard in a SINGLE 1-document Firestore write!
+ * - Skips writing if score increased by < 1% (and < 50 coins) and skin/rebirths haven't changed,
+ *   unless `force = true`.
  */
 export async function updateLeaderboardEntry(
   uid: string,
@@ -53,30 +76,44 @@ export async function updateLeaderboardEntry(
       : ['classic_matthew'];
 
   const prev = lastPublishedSnapshotByUid.get(uid);
-  if (
-    !force &&
-    prev &&
-    prev.score === validatedScore &&
-    prev.rebirths === rebirths &&
-    prev.skin === skin &&
-    prev.skinsCount === unlockedSkins.length
-  ) {
-    return true;
+  if (!force && prev) {
+    const scoreDelta = validatedScore - prev.score;
+    const relativeGain = prev.score > 0 ? scoreDelta / prev.score : scoreDelta;
+    const meaningfulScoreChange = scoreDelta >= 50 && relativeGain >= 0.01;
+    const metaChanged =
+      prev.rebirths !== rebirths ||
+      prev.skin !== skin ||
+      prev.skinsCount !== unlockedSkins.length;
+
+    if (!meaningfulScoreChange && !metaChanged) {
+      return true;
+    }
   }
 
-  const ok = await firestoreRestSetDoc(`leaderboards/${seasonId}/entries/${uid}`, {
+  const nowMs = Date.now();
+  const payload = {
     uid,
     username,
     seasonalScore: validatedScore,
     lifetimeCoins: Math.floor(state.lifetimeCoins || 0),
+    coins: Math.floor(state.coins || 0),
     totalClicks: Math.floor(state.clicks || 0),
     rebirthCount: rebirths,
+    prestigeShards: state.prestigeShards || 0,
+    lifetimePrestigeShards: state.lifetimePrestigeShards || 0,
+    gems: state.gems || 0,
+    lifetimeGems: state.lifetimeGems || 0,
     ascensionMultiplier: getAscensionMultiplier(state.prestigeShards),
     equippedSkin: skin,
     unlockedSkins,
-    updatedAtMs: Date.now(),
+    upgrades: state.upgrades || {},
+    claimedQuests: state.claimedQuests || [],
+    unlockedAchievements: state.unlockedAchievements || [],
+    updatedAtMs: nowMs,
     updatedAt: new Date(),
-  });
+  };
+
+  const ok = await firestoreRestSetDoc(`leaderboards/${seasonId}/entries/${uid}`, payload);
 
   if (ok) {
     lastPublishedSnapshotByUid.set(uid, {
@@ -84,7 +121,7 @@ export async function updateLeaderboardEntry(
       rebirths,
       skin,
       skinsCount: unlockedSkins.length,
-      publishedAtMs: Date.now(),
+      publishedAtMs: nowMs,
     });
   }
 
@@ -93,12 +130,23 @@ export async function updateLeaderboardEntry(
 
 /**
  * Fetches the top worldwide leaderboard entries for a given season via stateless REST.
- * Never blocks on pending writes and preserves all players' scores.
+ * Includes a 15-second read cache so rapid modal opens/refreshes never waste daily read quota.
  */
 export async function fetchWorldwideLeaderboard(
   seasonId: string = getActiveSeason().seasonId,
-  maxEntries = 50
+  maxEntries = 50,
+  bypassCache = false
 ): Promise<LeaderboardEntry[]> {
+  const nowMs = Date.now();
+  if (
+    !bypassCache &&
+    cachedLeaderboardList &&
+    cachedLeaderboardSeasonId === seasonId &&
+    nowMs - cachedLeaderboardFetchedAtMs < LEADERBOARD_READ_CACHE_TTL_MS
+  ) {
+    return cachedLeaderboardList.map((entry) => ({ ...entry })).slice(0, maxEntries);
+  }
+
   try {
     const docs = await firestoreRestListDocs(`leaderboards/${seasonId}/entries`, 100, 4500);
     const list: LeaderboardEntry[] = docs.map(({ id, data: d }) => ({
@@ -123,12 +171,28 @@ export async function fetchWorldwideLeaderboard(
           ? d.unlockedSkins
           : [d.equippedSkin || 'classic_matthew'],
       updatedAtMs: typeof d.updatedAtMs === 'number' ? d.updatedAtMs : 0,
+      coins: typeof d.coins === 'number' ? d.coins : undefined,
+      prestigeShards: typeof d.prestigeShards === 'number' ? d.prestigeShards : undefined,
+      lifetimePrestigeShards:
+        typeof d.lifetimePrestigeShards === 'number' ? d.lifetimePrestigeShards : undefined,
+      gems: typeof d.gems === 'number' ? d.gems : undefined,
+      lifetimeGems: typeof d.lifetimeGems === 'number' ? d.lifetimeGems : undefined,
+      upgrades: d.upgrades && typeof d.upgrades === 'object' ? d.upgrades : undefined,
+      claimedQuests: Array.isArray(d.claimedQuests) ? d.claimedQuests : undefined,
+      unlockedAchievements: Array.isArray(d.unlockedAchievements)
+        ? d.unlockedAchievements
+        : undefined,
     }));
 
-    return sortLeaderboardDeterministically(list).slice(0, maxEntries);
+    const sorted = sortLeaderboardDeterministically(list);
+    cachedLeaderboardSeasonId = seasonId;
+    cachedLeaderboardList = sorted;
+    cachedLeaderboardFetchedAtMs = nowMs;
+
+    return sorted.slice(0, maxEntries);
   } catch (err) {
     console.warn('Could not fetch worldwide leaderboard:', err);
-    return [];
+    return cachedLeaderboardList ? cachedLeaderboardList.slice(0, maxEntries) : [];
   }
 }
 
@@ -153,6 +217,11 @@ export async function fetchPlayerLeaderboardEntry(
 ): Promise<LeaderboardEntry | null> {
   if (!uid) return null;
 
+  if (cachedLeaderboardList && cachedLeaderboardSeasonId === seasonId) {
+    const cached = cachedLeaderboardList.find((e) => e.uid === uid);
+    if (cached) return { ...cached };
+  }
+
   try {
     const snap = await firestoreRestGetDoc(`leaderboards/${seasonId}/entries/${uid}`, false, 3500);
     if (!snap.exists) return null;
@@ -172,6 +241,17 @@ export async function fetchPlayerLeaderboardEntry(
           ? d.unlockedSkins
           : ['classic_matthew'],
       updatedAtMs: typeof d.updatedAtMs === 'number' ? d.updatedAtMs : 0,
+      coins: typeof d.coins === 'number' ? d.coins : undefined,
+      prestigeShards: typeof d.prestigeShards === 'number' ? d.prestigeShards : undefined,
+      lifetimePrestigeShards:
+        typeof d.lifetimePrestigeShards === 'number' ? d.lifetimePrestigeShards : undefined,
+      gems: typeof d.gems === 'number' ? d.gems : undefined,
+      lifetimeGems: typeof d.lifetimeGems === 'number' ? d.lifetimeGems : undefined,
+      upgrades: d.upgrades && typeof d.upgrades === 'object' ? d.upgrades : undefined,
+      claimedQuests: Array.isArray(d.claimedQuests) ? d.claimedQuests : undefined,
+      unlockedAchievements: Array.isArray(d.unlockedAchievements)
+        ? d.unlockedAchievements
+        : undefined,
     };
   } catch {
     return null;
