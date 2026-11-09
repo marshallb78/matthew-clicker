@@ -210,13 +210,13 @@ export function App() {
     return () => unsubscribe();
   }, []);
 
-  // Fast 25-second 1-document Leaderboard + Progress sync while actively playing,
-  // plus 5-minute deep profile backup & automatic sync on tab close/hide.
+  // Fast 10-second Realtime Database Leaderboard + Progress sync while actively playing
+  // (powered by stateless Firebase Realtime Database REST with unlimited daily writes!)
   useEffect(() => {
     const fastLeaderboardSync = () => {
       const curr = stateRef.current;
       if (!curr.cloudAccount) return;
-      const isRecentlyActive = Date.now() - (curr.lastActiveInputTimestamp || 0) < 30000;
+      const isRecentlyActive = Date.now() - (curr.lastActiveInputTimestamp || 0) < 20000;
       if (!isRecentlyActive) return;
       updateLeaderboardEntry(
         curr.cloudAccount.uid,
@@ -228,7 +228,7 @@ export function App() {
     const deepProfileBackup = () => {
       const curr = stateRef.current;
       if (!curr.cloudAccount) return;
-      const isRecentlyActive = Date.now() - (curr.lastActiveInputTimestamp || 0) < 310000;
+      const isRecentlyActive = Date.now() - (curr.lastActiveInputTimestamp || 0) < 45000;
       if (!isRecentlyActive) return;
       saveStateToCloud(
         curr.cloudAccount.uid,
@@ -237,8 +237,8 @@ export function App() {
       ).catch(() => {});
     };
 
-    const fastInterval = setInterval(fastLeaderboardSync, 25000);
-    const deepInterval = setInterval(deepProfileBackup, 300000);
+    const fastInterval = setInterval(fastLeaderboardSync, 10000);
+    const deepInterval = setInterval(deepProfileBackup, 30000);
 
     const onVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {

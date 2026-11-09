@@ -8,8 +8,9 @@ import {
 } from 'firebase/auth';
 import {
   getFirebaseServices,
+  rtdbRestGet,
+  rtdbRestWrite,
   firestoreRestGetDoc,
-  firestoreRestSetDoc,
 } from './config';
 
 export interface PlayerAccount {
@@ -95,11 +96,11 @@ export async function registerWithUsername(
     // ignore
   }
 
-  firestoreRestSetDoc(`usernames/${normalized}`, {
+  rtdbRestWrite(`usernames/${normalized}`, {
     uid: user.uid,
     username: cleanDisplayUsername,
     normalizedUsername: normalized,
-    createdAt: new Date(),
+    createdAtMs: Date.now(),
   }).catch(() => {});
 
   return {
@@ -243,9 +244,14 @@ export async function authenticateUnified(
 
     if (!user.displayName) {
       try {
-        const docSnap = await firestoreRestGetDoc(`usernames/${normalized}`, false, 2000);
-        if (docSnap.exists && typeof docSnap.data.username === 'string') {
-          displayUsername = docSnap.data.username;
+        const rtdbUser = await rtdbRestGet<{ username?: string }>(`usernames/${normalized}`, 2000);
+        if (rtdbUser && typeof rtdbUser.username === 'string') {
+          displayUsername = rtdbUser.username;
+        } else {
+          const docSnap = await firestoreRestGetDoc(`usernames/${normalized}`, false, 2000);
+          if (docSnap.exists && typeof docSnap.data.username === 'string') {
+            displayUsername = docSnap.data.username;
+          }
         }
       } catch {
         // use cleanDisplayUsername
@@ -285,12 +291,12 @@ export async function authenticateUnified(
       // ignore
     }
 
-    // Non-blocking write to usernames registry
-    firestoreRestSetDoc(`usernames/${normalized}`, {
+    // Non-blocking write to Realtime Database usernames registry
+    rtdbRestWrite(`usernames/${normalized}`, {
       uid: user.uid,
       username: cleanDisplayUsername,
       normalizedUsername: normalized,
-      createdAt: new Date(),
+      createdAtMs: Date.now(),
     }).catch(() => {});
 
     return {

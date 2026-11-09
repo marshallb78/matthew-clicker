@@ -1,7 +1,7 @@
 import {
+  rtdbRestGet,
+  rtdbRestWrite,
   firestoreRestGetDoc,
-  firestoreRestSetDoc,
-  isCloudWriteCoolingDown,
 } from './config';
 import { GameState } from '../types/game';
 import {
@@ -15,15 +15,12 @@ import { updateLeaderboardEntry } from './leaderboard';
 
 export type CloudSyncStatus = 'idle' | 'syncing' | 'synced' | 'offline_pending' | 'error';
 
-// Track last written state per UID to avoid redundant Firestore writes and preserve daily quota
-const lastSavedPermHashByUid = new Map<string, string>();
-const lastSavedSeasonCoinsByUid = new Map<string, number>();
+const lastSavedSignatureByUid = new Map<string, string>();
 
 /**
- * Loads the player's permanent profile (`users/{uid}`) and current seasonal progress
- * (`users/{uid}/seasons/{seasonId}`) from Firestore via stateless REST, safely reconciling with local state.
- * - Never resets or overwrites progress with a lower save.
- * - Never hangs if Firestore daily write quota is in cooldown.
+ * Loads the player's profile and current seasonal progress from both
+ * Firebase Realtime Database (primary, unlimited daily writes) AND legacy Firestore,
+ * merging the highest progress across all sources and local state so zero data is ever lost.
  */
 export async function loadAndReconcileCloudSave(
   uid: string,
@@ -33,163 +30,191 @@ export async function loadAndReconcileCloudSave(
   if (!uid) return localState;
 
   const activeSeason = getActiveSeason();
-  let userSnap: { exists: boolean; id: string; data: Record<string, any> } = {
-    exists: false,
-    id: uid,
-    data: {},
-  };
-  let seasonSnap: { exists: boolean; id: string; data: Record<string, any> } = {
-    exists: false,
-    id: activeSeason.seasonId,
-    data: {},
-  };
 
   try {
-    const [uDoc, sDoc, lbDoc] = await Promise.all([
-      firestoreRestGetDoc(`users/${uid}`, true, 3500),
-      firestoreRestGetDoc(`users/${uid}/seasons/${activeSeason.seasonId}`, true, 3500),
-      firestoreRestGetDoc(`leaderboards/${activeSeason.seasonId}/entries/${uid}`, false, 3500),
+    const [rtdbUser, rtdbLb, fsUser, fsSeason, fsLb] = await Promise.all([
+      rtdbRestGet<Record<string, any>>(`users/${uid}`, 3500),
+      rtdbRestGet<Record<string, any>>(`leaderboards/${activeSeason.seasonId}/${uid}`, 3500),
+      firestoreRestGetDoc(`users/${uid}`, true, 3500).catch(() => ({
+        exists: false,
+        id: uid,
+        data: {},
+      })),
+      firestoreRestGetDoc(`users/${uid}/seasons/${activeSeason.seasonId}`, true, 3500).catch(
+        () => ({
+          exists: false,
+          id: activeSeason.seasonId,
+          data: {},
+        })
+      ),
+      firestoreRestGetDoc(`leaderboards/${activeSeason.seasonId}/entries/${uid}`, false, 3500).catch(
+        () => ({
+          exists: false,
+          id: uid,
+          data: {},
+        })
+      ),
     ]);
-    userSnap = uDoc;
-    // Merge any newer fields from the 1-doc leaderboard snapshot into seasonSnap
-    const lbData = lbDoc.exists ? lbDoc.data : {};
-    const sData = sDoc.exists ? sDoc.data : {};
-    const lbLifetime = typeof lbData.lifetimeCoins === 'number' ? lbData.lifetimeCoins : 0;
-    const sLifetime = typeof sData.lifetimeCoins === 'number' ? sData.lifetimeCoins : 0;
-    seasonSnap = {
-      exists: sDoc.exists || lbDoc.exists,
-      id: activeSeason.seasonId,
-      data: lbLifetime > sLifetime ? { ...sData, ...lbData } : { ...lbData, ...sData },
-    };
-  } catch (err) {
-    console.warn('Cloud profile read skipped/offline, keeping local state:', err);
-    return localState;
-  }
 
-  // If this account has never saved to the cloud before, upload current local state non-blockingly
-  if (!userSnap.exists && !seasonSnap.exists) {
-    saveStateToCloud(uid, username, localState).catch(() => {});
-    return localState;
-  }
+    const hasAnyCloudData =
+      Boolean(rtdbUser) ||
+      Boolean(rtdbLb) ||
+      fsUser.exists ||
+      fsSeason.exists ||
+      fsLb.exists;
 
-  const permData = userSnap.exists ? userSnap.data : {};
-  const seasonData = seasonSnap.exists ? seasonSnap.data : {};
-
-  // Merge permanent skin ownership (permanent across all seasons & devices)
-  const cloudSkins: string[] = Array.isArray(permData.unlockedSkins) ? permData.unlockedSkins : [];
-  const mergedSkins = Array.from(
-    new Set(['classic_matthew', ...localState.unlockedSkins, ...cloudSkins])
-  ).filter((id) => isValidSkinId(id));
-
-  // Merge upgrades by taking the maximum count per upgrade ID between local and cloud
-  const cloudUpgrades: Record<string, number> =
-    seasonData.upgrades && typeof seasonData.upgrades === 'object' ? seasonData.upgrades : {};
-  const mergedUpgrades: Record<string, number> = { ...localState.upgrades };
-  for (const [upId, count] of Object.entries(cloudUpgrades)) {
-    if (typeof count === 'number') {
-      mergedUpgrades[upId] = Math.max(mergedUpgrades[upId] || 0, count);
+    if (!hasAnyCloudData) {
+      saveStateToCloud(uid, username, localState, true).catch(() => {});
+      return localState;
     }
+
+    const sources: Record<string, any>[] = [
+      fsLb.exists ? fsLb.data : {},
+      fsSeason.exists ? fsSeason.data : {},
+      fsUser.exists ? fsUser.data : {},
+      rtdbLb || {},
+      rtdbUser?.seasons?.[activeSeason.seasonId] || {},
+      rtdbUser || {},
+    ];
+
+    // Pick the cloud source with the highest lifetimeCoins as base seasonal object
+    let bestCloudSeason: Record<string, any> = {};
+    let maxCloudLifetimeCoins = 0;
+    let maxCloudCoins = 0;
+    let maxCloudSeasonalScore = 0;
+    let maxCloudClicks = 0;
+    let maxCloudCritClicks = 0;
+    let maxCloudPrestigeCount = 0;
+    let maxCloudPrestigeShards = 0;
+    let maxCloudLifetimeShards = 0;
+    let maxCloudGems = 0;
+    let maxCloudLifetimeGems = 0;
+
+    const allSkins = new Set<string>(['classic_matthew', ...(localState.unlockedSkins || [])]);
+    const allPermAch = new Set<string>(localState.permanentAchievements || []);
+    const allUnlockedAch = new Set<string>(localState.unlockedAchievements || []);
+    const allClaimedQuests = new Set<string>(localState.claimedQuests || []);
+    const mergedUpgrades: Record<string, number> = { ...(localState.upgrades || {}) };
+
+    let cloudEquippedSkin: string | null = null;
+
+    for (const src of sources) {
+      if (!src || typeof src !== 'object') continue;
+      const lc = typeof src.lifetimeCoins === 'number' ? src.lifetimeCoins : 0;
+      if (lc >= maxCloudLifetimeCoins) {
+        maxCloudLifetimeCoins = lc;
+        bestCloudSeason = { ...bestCloudSeason, ...src };
+      }
+      if (typeof src.coins === 'number') maxCloudCoins = Math.max(maxCloudCoins, src.coins);
+      if (typeof src.seasonalScore === 'number') {
+        maxCloudSeasonalScore = Math.max(maxCloudSeasonalScore, src.seasonalScore);
+      }
+      if (typeof src.clicks === 'number') maxCloudClicks = Math.max(maxCloudClicks, src.clicks);
+      if (typeof src.criticalClicks === 'number') {
+        maxCloudCritClicks = Math.max(maxCloudCritClicks, src.criticalClicks);
+      }
+      if (typeof src.prestigeCount === 'number') {
+        maxCloudPrestigeCount = Math.max(maxCloudPrestigeCount, src.prestigeCount);
+      }
+      if (typeof src.rebirthCount === 'number') {
+        maxCloudPrestigeCount = Math.max(maxCloudPrestigeCount, src.rebirthCount);
+      }
+      if (typeof src.prestigeShards === 'number') {
+        maxCloudPrestigeShards = Math.max(maxCloudPrestigeShards, src.prestigeShards);
+      }
+      if (typeof src.lifetimePrestigeShards === 'number') {
+        maxCloudLifetimeShards = Math.max(maxCloudLifetimeShards, src.lifetimePrestigeShards);
+      }
+      if (typeof src.gems === 'number') maxCloudGems = Math.max(maxCloudGems, src.gems);
+      if (typeof src.lifetimeGems === 'number') {
+        maxCloudLifetimeGems = Math.max(maxCloudLifetimeGems, src.lifetimeGems);
+      }
+
+      if (Array.isArray(src.unlockedSkins)) {
+        src.unlockedSkins.forEach((id: string) => {
+          if (isValidSkinId(id)) allSkins.add(id);
+        });
+      }
+      if (typeof src.equippedSkin === 'string' && isValidSkinId(src.equippedSkin)) {
+        cloudEquippedSkin = src.equippedSkin;
+      }
+      if (Array.isArray(src.permanentAchievements)) {
+        src.permanentAchievements.forEach((a: string) => allPermAch.add(a));
+      }
+      if (Array.isArray(src.unlockedAchievements)) {
+        src.unlockedAchievements.forEach((a: string) => allUnlockedAch.add(a));
+      }
+      if (Array.isArray(src.claimedQuests)) {
+        src.claimedQuests.forEach((q: string) => allClaimedQuests.add(q));
+      }
+      if (src.upgrades && typeof src.upgrades === 'object') {
+        for (const [upId, count] of Object.entries(src.upgrades)) {
+          if (typeof count === 'number') {
+            mergedUpgrades[upId] = Math.max(mergedUpgrades[upId] || 0, count);
+          }
+        }
+      }
+    }
+
+    const mergedSkins = Array.from(allSkins);
+    const useCloudBase = maxCloudLifetimeCoins >= (localState.lifetimeCoins || 0);
+
+    const chosenEquippedSkin =
+      useCloudBase && cloudEquippedSkin && mergedSkins.includes(cloudEquippedSkin)
+        ? cloudEquippedSkin
+        : mergedSkins.includes(localState.equippedSkin)
+        ? localState.equippedSkin
+        : cloudEquippedSkin && mergedSkins.includes(cloudEquippedSkin)
+        ? cloudEquippedSkin
+        : 'classic_matthew';
+
+    const mergedRaw: Partial<GameState> = {
+      ...(useCloudBase ? bestCloudSeason : localState),
+      coins: Math.max(localState.coins || 0, maxCloudCoins),
+      lifetimeCoins: Math.max(localState.lifetimeCoins || 0, maxCloudLifetimeCoins),
+      seasonalScore: Math.max(
+        localState.seasonalScore || 0,
+        maxCloudSeasonalScore,
+        Math.floor(Math.max(localState.lifetimeCoins || 0, maxCloudLifetimeCoins))
+      ),
+      clicks: Math.max(localState.clicks || 0, maxCloudClicks),
+      criticalClicks: Math.max(localState.criticalClicks || 0, maxCloudCritClicks),
+      prestigeCount: Math.max(localState.prestigeCount || 0, maxCloudPrestigeCount),
+      prestigeShards: Math.max(localState.prestigeShards || 0, maxCloudPrestigeShards),
+      lifetimePrestigeShards: Math.max(
+        localState.lifetimePrestigeShards || 0,
+        maxCloudLifetimeShards
+      ),
+      upgrades: mergedUpgrades,
+      unlockedSkins: mergedSkins,
+      equippedSkin: chosenEquippedSkin,
+      gems: Math.max(localState.gems || 0, maxCloudGems),
+      lifetimeGems: Math.max(localState.lifetimeGems || 0, maxCloudLifetimeGems),
+      permanentAchievements: Array.from(allPermAch),
+      unlockedAchievements: Array.from(allUnlockedAch),
+      claimedQuests: Array.from(allClaimedQuests),
+      currentSeasonId: activeSeason.seasonId,
+      settings: {
+        ...localState.settings,
+      },
+    };
+
+    const reconciled = sanitizeAndValidateGameState(mergedRaw);
+    saveGame(reconciled);
+
+    // Immediately sync reconciled profile & leaderboard into Realtime Database
+    saveStateToCloud(uid, username, reconciled, true).catch(() => {});
+    return reconciled;
+  } catch (err) {
+    console.warn('Cloud reconciliation fallback to local state:', err);
+    return localState;
   }
-
-  const cloudLifetimeCoins =
-    typeof seasonData.lifetimeCoins === 'number' ? seasonData.lifetimeCoins : 0;
-  const cloudCoins = typeof seasonData.coins === 'number' ? seasonData.coins : 0;
-  const cloudSeasonalScore =
-    typeof seasonData.seasonalScore === 'number' ? seasonData.seasonalScore : 0;
-  const useCloudSeason = seasonSnap.exists && cloudLifetimeCoins >= localState.lifetimeCoins;
-
-  const chosenEquippedSkin =
-    useCloudSeason &&
-    typeof permData.equippedSkin === 'string' &&
-    mergedSkins.includes(permData.equippedSkin)
-      ? permData.equippedSkin
-      : mergedSkins.includes(localState.equippedSkin)
-      ? localState.equippedSkin
-      : typeof permData.equippedSkin === 'string' && mergedSkins.includes(permData.equippedSkin)
-      ? permData.equippedSkin
-      : 'classic_matthew';
-
-  const mergedRaw: Partial<GameState> = {
-    ...(useCloudSeason ? seasonData : localState),
-    coins: Math.max(localState.coins || 0, cloudCoins),
-    lifetimeCoins: Math.max(localState.lifetimeCoins || 0, cloudLifetimeCoins),
-    seasonalScore: Math.max(
-      localState.seasonalScore || 0,
-      cloudSeasonalScore,
-      Math.floor(Math.max(localState.lifetimeCoins || 0, cloudLifetimeCoins))
-    ),
-    clicks: Math.max(
-      localState.clicks || 0,
-      typeof seasonData.clicks === 'number' ? seasonData.clicks : 0
-    ),
-    criticalClicks: Math.max(
-      localState.criticalClicks || 0,
-      typeof seasonData.criticalClicks === 'number' ? seasonData.criticalClicks : 0
-    ),
-    prestigeCount: Math.max(
-      localState.prestigeCount || 0,
-      typeof seasonData.prestigeCount === 'number' ? seasonData.prestigeCount : 0
-    ),
-    prestigeShards: Math.max(
-      localState.prestigeShards || 0,
-      typeof seasonData.prestigeShards === 'number' ? seasonData.prestigeShards : 0
-    ),
-    lifetimePrestigeShards: Math.max(
-      localState.lifetimePrestigeShards || 0,
-      typeof seasonData.lifetimePrestigeShards === 'number' ? seasonData.lifetimePrestigeShards : 0
-    ),
-    upgrades: mergedUpgrades,
-    unlockedSkins: mergedSkins,
-    equippedSkin: chosenEquippedSkin,
-    gems: Math.max(localState.gems || 0, typeof permData.gems === 'number' ? permData.gems : 0),
-    lifetimeGems: Math.max(
-      localState.lifetimeGems || 0,
-      typeof permData.lifetimeGems === 'number' ? permData.lifetimeGems : 0
-    ),
-    permanentAchievements: Array.from(
-      new Set([
-        ...(localState.permanentAchievements || []),
-        ...(Array.isArray(permData.permanentAchievements) ? permData.permanentAchievements : []),
-      ])
-    ),
-    unlockedAchievements: Array.from(
-      new Set([
-        ...(localState.unlockedAchievements || []),
-        ...(Array.isArray(seasonData.unlockedAchievements) ? seasonData.unlockedAchievements : []),
-      ])
-    ),
-    claimedQuests: Array.from(
-      new Set([
-        ...(localState.claimedQuests || []),
-        ...(Array.isArray(seasonData.claimedQuests) ? seasonData.claimedQuests : []),
-      ])
-    ),
-    seasonHistory: Array.isArray(permData.seasonHistory)
-      ? permData.seasonHistory
-      : localState.seasonHistory || [],
-    lastDailyLoginClaimDate:
-      permData.lastDailyLoginClaimDate || localState.lastDailyLoginClaimDate || null,
-    currentSeasonId: activeSeason.seasonId,
-    introCutsceneSeen: Boolean(permData.introCutsceneSeen || localState.introCutsceneSeen),
-    lastBetaWipeId: permData.lastBetaWipeId || localState.lastBetaWipeId || null,
-    settings: {
-      ...localState.settings,
-      ...(permData.settings && typeof permData.settings === 'object' ? permData.settings : {}),
-    },
-  };
-
-  const reconciled = sanitizeAndValidateGameState(mergedRaw);
-  saveGame(reconciled);
-
-  // Sync reconciled state back to cloud non-blockingly so sign-in finishes immediately
-  saveStateToCloud(uid, username, reconciled).catch(() => {});
-  return reconciled;
 }
 
 /**
- * Persists separated permanent profile data and seasonal data to Firestore,
- * and updates the public worldwide season leaderboard.
- * Uses smart change detection + circuit breaker to conserve daily Firestore writes.
+ * Persists player profile and seasonal progression directly to Firebase Realtime Database (`users/{uid}`)
+ * and updates the Realtime Database Worldwide Leaderboard (`leaderboards/{seasonId}/{uid}`).
+ * - Unlimited daily writes on the Free Spark plan!
  */
 export async function saveStateToCloud(
   uid: string,
@@ -198,11 +223,15 @@ export async function saveStateToCloud(
   force = false
 ): Promise<boolean> {
   if (!uid || !username) return false;
-  if (isCloudWriteCoolingDown()) return false;
 
   const activeSeason = getActiveSeason();
+  const signature = `${Math.floor(state.lifetimeCoins)}_${Math.floor(state.coins)}_${state.prestigeCount}_${state.equippedSkin}_${state.unlockedSkins.length}_${state.gems}`;
 
-  const permanentPayload = {
+  if (!force && lastSavedSignatureByUid.get(uid) === signature) {
+    return true;
+  }
+
+  const userPayload = {
     uid,
     username,
     unlockedSkins: state.unlockedSkins,
@@ -216,84 +245,47 @@ export async function saveStateToCloud(
     lifetimeAllSeasonsClicks: Math.max(state.lifetimeAllSeasonsClicks || 0, state.clicks),
     introCutsceneSeen: state.introCutsceneSeen,
     discoveredEasterEggs: state.discoveredEasterEggs || [],
-    lastBetaWipeId: state.lastBetaWipeId || null,
     settings: state.settings,
-    updatedAt: new Date(),
+    updatedAtMs: Date.now(),
+    seasons: {
+      [activeSeason.seasonId]: {
+        seasonId: activeSeason.seasonId,
+        coins: state.coins,
+        lifetimeCoins: state.lifetimeCoins,
+        seasonalScore: Math.max(state.seasonalScore || 0, Math.floor(state.lifetimeCoins)),
+        clicks: state.clicks,
+        criticalClicks: state.criticalClicks,
+        maxComboReached: state.maxComboReached || 0,
+        upgrades: state.upgrades,
+        currentRealm: state.currentRealm,
+        unlockedRealms: state.unlockedRealms,
+        prestigeCount: state.prestigeCount,
+        prestigeShards: state.prestigeShards,
+        lifetimePrestigeShards: state.lifetimePrestigeShards,
+        prestigeUpgrades: state.prestigeUpgrades,
+        unlockedAchievements: state.unlockedAchievements,
+        claimedQuests: state.claimedQuests,
+        eventStats: state.eventStats,
+        totalPlaytimeSeconds: state.totalPlaytimeSeconds,
+        goldenMatthewsClicked: state.goldenMatthewsClicked,
+        giantMatthewsClicked: state.giantMatthewsClicked || 0,
+        lastSaveTime: Date.now(),
+      },
+    },
   };
 
-  const permHash = JSON.stringify({
-    u: username,
-    s: state.unlockedSkins,
-    e: state.equippedSkin,
-    g: state.gems,
-    pa: state.permanentAchievements?.length || 0,
-  });
+  const [userOk, lbOk] = await Promise.all([
+    rtdbRestWrite(`users/${uid}`, userPayload, 'PUT'),
+    updateLeaderboardEntry(uid, username, state, activeSeason.seasonId, force),
+  ]);
 
-  const seasonalPayload = {
-    seasonId: activeSeason.seasonId,
-    lastBetaWipeId: state.lastBetaWipeId || null,
-    coins: state.coins,
-    lifetimeCoins: state.lifetimeCoins,
-    seasonalScore: Math.max(state.seasonalScore || 0, Math.floor(state.lifetimeCoins)),
-    clicks: state.clicks,
-    criticalClicks: state.criticalClicks,
-    maxComboReached: state.maxComboReached || 0,
-    upgrades: state.upgrades,
-    currentRealm: state.currentRealm,
-    unlockedRealms: state.unlockedRealms,
-    uperCompleted: state.uperCompleted,
-    uperCompletionModalDismissed: state.uperCompletionModalDismissed,
-    prestigeCount: state.prestigeCount,
-    prestigeShards: state.prestigeShards,
-    lifetimePrestigeShards: state.lifetimePrestigeShards,
-    prestigeUpgrades: state.prestigeUpgrades,
-    unlockedAchievements: state.unlockedAchievements,
-    claimedQuests: state.claimedQuests,
-    eventStats: state.eventStats,
-    totalPlaytimeSeconds: state.totalPlaytimeSeconds,
-    goldenMatthewsClicked: state.goldenMatthewsClicked,
-    giantMatthewsClicked: state.giantMatthewsClicked || 0,
-    lastSaveTime: Date.now(),
-    updatedAt: new Date(),
-  };
-
-  const tasks: Promise<boolean>[] = [];
-
-  // Only write `users/{uid}` when permanent fields (skins, gems, username) actually changed!
-  if (force || lastSavedPermHashByUid.get(uid) !== permHash) {
-    tasks.push(
-      firestoreRestSetDoc(`users/${uid}`, permanentPayload).then((ok) => {
-        if (ok) lastSavedPermHashByUid.set(uid, permHash);
-        return ok;
-      })
-    );
+  if (userOk || lbOk) {
+    lastSavedSignatureByUid.set(uid, signature);
   }
 
-  // Only write `users/{uid}/seasons/{seasonId}` when lifetimeCoins or prestige changed
-  const prevSeasonCoins = lastSavedSeasonCoinsByUid.get(uid) ?? -1;
-  const currentSignature = Math.floor(state.lifetimeCoins) + (state.prestigeCount || 0) * 17;
-  if (force || prevSeasonCoins !== currentSignature) {
-    tasks.push(
-      firestoreRestSetDoc(`users/${uid}/seasons/${activeSeason.seasonId}`, seasonalPayload).then(
-        (ok) => {
-          if (ok) lastSavedSeasonCoinsByUid.set(uid, currentSignature);
-          return ok;
-        }
-      )
-    );
-  }
-
-  tasks.push(updateLeaderboardEntry(uid, username, state, activeSeason.seasonId, force));
-
-  if (tasks.length === 0) return true;
-  const results = await Promise.all(tasks);
-  return results.some(Boolean);
+  return userOk || lbOk;
 }
 
-/**
- * Atomically validates and processes a 50-gem Matthew Storm skin purchase.
- * Deducts gems, grants permanent skin ownership, automatically equips the skin, and saves.
- */
 export async function purchaseStormSkinAtomic(
   state: GameState,
   skinId: string,

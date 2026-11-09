@@ -7,6 +7,9 @@ const env = (typeof import.meta !== 'undefined' && (import.meta as any).env) || 
 export const firebaseConfig = {
   apiKey: env.VITE_FIREBASE_API_KEY || 'AIzaSyCTXzcBJ5khpXzaXgd8WfaUfYntPFGZuqg',
   authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || 'matthew-clicker-2268f.firebaseapp.com',
+  databaseURL:
+    env.VITE_FIREBASE_DATABASE_URL ||
+    'https://matthew-clicker-2268f-default-rtdb.firebaseio.com',
   projectId: env.VITE_FIREBASE_PROJECT_ID || 'matthew-clicker-2268f',
   storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || 'matthew-clicker-2268f.firebasestorage.app',
   messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || '603829057642',
@@ -18,15 +21,8 @@ let authInstance: Auth | null = null;
 let dbInstance: Firestore | null = null;
 let initError: string | null = null;
 
-/**
- * Circuit Breaker for Firestore Writes:
- * When the Firebase Spark Free Plan daily write quota (20,000 writes/day) is reached,
- * Firestore returns HTTP 429 / RESOURCE_EXHAUSTED.
- * Using stateless REST calls + this circuit breaker prevents the Firestore JS SDK
- * from hanging promises or clogging its WebChannel connection with infinite retries.
- */
 let writeCooldownUntilMs = 0;
-const WRITE_COOLDOWN_DURATION_MS = 5 * 60 * 1000; // 5 minutes cooldown on 429 quota exceeded
+const WRITE_COOLDOWN_DURATION_MS = 5 * 60 * 1000;
 
 export function isCloudWriteCoolingDown(): boolean {
   return Date.now() < writeCooldownUntilMs;
@@ -64,7 +60,82 @@ export function getFirebaseServices(): {
   }
 }
 
+const RTDB_REST_BASE = firebaseConfig.databaseURL.replace(/\/$/, '');
 const FIRESTORE_REST_BASE = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents`;
+
+export async function getAuthIdToken(timeoutMs = 2500): Promise<string | null> {
+  if (typeof window === 'undefined') return null;
+  const { auth } = getFirebaseServices();
+  if (!auth?.currentUser) return null;
+  try {
+    return await Promise.race([
+      auth.currentUser.getIdToken(),
+      new Promise<string | null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+    ]);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Stateless Firebase Realtime Database GET via HTTP REST.
+ * - Zero persistent WebSocket overhead (supports thousands of concurrent players).
+ * - Unlimited daily reads/writes under the 10 GB/month bandwidth tier.
+ */
+export async function rtdbRestGet<T = any>(
+  path: string,
+  timeoutMs = 3500
+): Promise<T | null> {
+  const cleanPath = path.replace(/^\/+|\.json$/g, '');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${RTDB_REST_BASE}/${cleanPath}.json`, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as T | null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Stateless Firebase Realtime Database PUT/PATCH via HTTP REST with Auth Token.
+ * - Unlimited daily writes on the Free Spark plan!
+ */
+export async function rtdbRestWrite(
+  path: string,
+  data: Record<string, any>,
+  method: 'PUT' | 'PATCH' = 'PUT',
+  timeoutMs = 3500
+): Promise<boolean> {
+  const cleanPath = path.replace(/^\/+|\.json$/g, '');
+  const token = await getAuthIdToken();
+  if (!token) return false;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(
+      `${RTDB_REST_BASE}/${cleanPath}.json?auth=${encodeURIComponent(token)}`,
+      {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+        signal: controller.signal,
+      }
+    );
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export function decodeFirestoreValue(valObj: any): any {
   if (!valObj || typeof valObj !== 'object') return null;
@@ -104,7 +175,6 @@ export function encodeFirestoreValue(val: any): any {
     if (!Number.isFinite(val)) {
       return { integerValue: '0' };
     }
-    // Use integerValue for safe integers < 1e15, doubleValue for floats or huge numbers (Quadrillions to Decillions)
     if (Number.isInteger(val) && Math.abs(val) < 1e15) {
       return { integerValue: String(val) };
     }
@@ -124,7 +194,6 @@ export function encodeFirestoreValue(val: any): any {
     };
   }
   if (typeof val === 'object') {
-    // Handle serverTimestamp sentinel or plain objects
     if ('_methodName' in val && val._methodName === 'serverTimestamp') {
       return { timestampValue: new Date().toISOString() };
     }
@@ -153,30 +222,15 @@ async function getAuthBearerHeaders(requireAuth: boolean): Promise<Record<string
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  if (typeof window === 'undefined') return headers;
-  const { auth } = getFirebaseServices();
-  if (auth?.currentUser) {
-    try {
-      const token = await Promise.race([
-        auth.currentUser.getIdToken(),
-        new Promise<string | null>((resolve) => setTimeout(() => resolve(null), 2000)),
-      ]);
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-    } catch {
-      // Proceed without token if unavailable
-    }
-  } else if (requireAuth) {
+  const token = await getAuthIdToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  } else if (requireAuth && typeof window !== 'undefined') {
     throw new Error('Not authenticated');
   }
   return headers;
 }
 
-/**
- * Fast, non-hanging Firestore document read via REST with a hard timeout.
- * Never gets stuck behind a backed-up Firestore WebChannel write queue.
- */
 export async function firestoreRestGetDoc(
   docPath: string,
   requireAuth = false,
@@ -209,9 +263,6 @@ export async function firestoreRestGetDoc(
   }
 }
 
-/**
- * Fast, non-hanging Firestore collection list via REST with a hard timeout.
- */
 export async function firestoreRestListDocs(
   collectionPath: string,
   pageSize = 100,
@@ -241,11 +292,6 @@ export async function firestoreRestListDocs(
   }
 }
 
-/**
- * Fast, non-hanging Firestore document write (PATCH) via REST with Circuit Breaker.
- * - Immediately returns `false` if write quota is in cooldown (`429 RESOURCE_EXHAUSTED`),
- *   preventing the app from ever freezing or spamming retries.
- */
 export async function firestoreRestSetDoc(
   docPath: string,
   data: Record<string, any>,
@@ -269,7 +315,6 @@ export async function firestoreRestSetDoc(
 
     if (res.status === 429) {
       markCloudWriteQuotaExceeded();
-      console.warn('Firestore daily write quota reached (429); pausing cloud writes for 5m.');
       return false;
     }
 
