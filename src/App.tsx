@@ -2,20 +2,21 @@ import React, { useState, useEffect, useRef } from 'react';
 import { GameState } from './types/game';
 import { loadGame, saveGame, performBetaWipeIfDue } from './utils/storage';
 import { equipSkin, getSkinById, checkAndApplyMilestoneUnlocks } from './data/skins';
+import { checkAndAutoClaimQuests } from './data/quests';
 import { calculateOfflineEarnings, calculateCPS } from './utils/calculations';
+import { formatNumber } from './utils/formatters';
 import {
   getActiveSeason,
   isFridayBonusActive,
   evaluateMatthewStormState,
 } from './utils/scheduleEngine';
-import { MATTHEW_STORM_CONFIG, BETA_RESET_CONFIG } from './config/gameConfig';
+import { MATTHEW_STORM_CONFIG } from './config/gameConfig';
 import { subscribeToAuthChanges } from './firebase/auth';
 import { loadAndReconcileCloudSave, saveStateToCloud } from './firebase/cloudSave';
 import { updateLeaderboardEntry } from './firebase/leaderboard';
 import { useGameLoop } from './hooks/useGameLoop';
 import { ClickerArea } from './components/ClickerArea';
 import { RightPanel } from './components/RightPanel';
-import { SettingsModal } from './components/SettingsModal';
 import { ParticleCanvas, particleEngine } from './components/ParticleCanvas';
 import { GoldenMatthewEvent } from './components/GoldenMatthewEvent';
 import { OfflineProgressModal } from './components/OfflineProgressModal';
@@ -24,6 +25,8 @@ import { AccountModal } from './components/AccountModal';
 import { LeaderboardModal } from './components/LeaderboardModal';
 import { MatthewStormModal } from './components/MatthewStormModal';
 import { IntroCutsceneModal } from './components/IntroCutsceneModal';
+import { EscMenuModal } from './components/EscMenuModal';
+import { SeasonDowntimeModal } from './components/SeasonDowntimeModal';
 import { soundManager } from './audio/soundManager';
 import { BALANCE } from './data/balance';
 import { X, Sparkles, ChevronUp, ChevronDown } from 'lucide-react';
@@ -36,19 +39,16 @@ interface Toast {
 
 export function App() {
   const [state, setState] = useState<GameState>(() => loadGame());
-  const [showSettings, setShowSettings] = useState(false);
+  const [showEscMenu, setShowEscMenu] = useState(false);
   const [showSkinQualityModal, setShowSkinQualityModal] = useState(false);
-  // Prompt the user to Sign In / Create Account on every reload after the loading screen finishes!
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [showLeaderboardModal, setShowLeaderboardModal] = useState(false);
   const [showStormShop, setShowStormShop] = useState(false);
   const [showStormRecap, setShowStormRecap] = useState(false);
-  // Sleek Loading Screen animation plays on site reload/entry
   const [showIntroCutscene, setShowIntroCutscene] = useState<boolean>(true);
 
   // Schedule & Live Event state
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
-  const [testSimStartMs, setTestSimStartMs] = useState<number | null>(null);
 
   const [offlineData, setOfflineData] = useState<{ elapsed: number; coins: number } | null>(null);
   const [notifications, setNotifications] = useState<Toast[]>([]);
@@ -56,6 +56,10 @@ export function App() {
 
   const stateRef = useRef(state);
   stateRef.current = state;
+
+  // Prevents background auto-save from overwriting cloud progress before initial login reconciliation completes
+  const isReconcilingCloudRef = useRef<boolean>(false);
+  const offlineCheckedForUidRef = useRef<string | null>(null);
 
   const prevStormStatusRef = useRef<string>('pre_countdown');
   const prevWaveIndexRef = useRef<number>(-1);
@@ -65,7 +69,7 @@ export function App() {
   const seasonRemainingSec = Math.max(0, Math.floor(seasonInfo.remainingMs / 1000));
 
   const fridayBonus = isFridayBonusActive(nowMs);
-  const stormState = evaluateMatthewStormState(nowMs, testSimStartMs);
+  const stormState = evaluateMatthewStormState(nowMs, null);
   const isStormActive = stormState.status === 'active';
   const stormWaveMultiplier = isStormActive
     ? stormState.currentWave
@@ -81,34 +85,44 @@ export function App() {
     }, 3500);
   };
 
-  // 1-second schedule ticker for Season, Friday 2×, Matthew Storm waves, and Monday 1 AM Beta Reset
+  // Disable right-click context menu globally so fast trackpad clicking never opens a browser menu
+  useEffect(() => {
+    const preventContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener('contextmenu', preventContextMenu);
+    return () => window.removeEventListener('contextmenu', preventContextMenu);
+  }, []);
+
+  // ESC Key Listener: Opens/closes the Full In-Game Menu Screen
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (showIntroCutscene) return;
+      e.preventDefault();
+
+      if (showSkinQualityModal) {
+        setShowSkinQualityModal(false);
+        return;
+      }
+      if (showLeaderboardModal) {
+        setShowLeaderboardModal(false);
+        return;
+      }
+      if (showStormShop) {
+        setShowStormShop(false);
+        return;
+      }
+      setShowEscMenu((prev) => !prev);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showIntroCutscene, showSkinQualityModal, showLeaderboardModal, showStormShop]);
+
+  // 1-second schedule ticker
   useEffect(() => {
     const timer = setInterval(() => {
-      const currentNow = Date.now();
-      setNowMs(currentNow);
-
-      // Enforce Monday 1:00 AM Beta Reset live if player is currently online when 1:00 AM hits
-      if (
-        currentNow >= BETA_RESET_CONFIG.resetTimeMs &&
-        stateRef.current.lastBetaWipeId !== BETA_RESET_CONFIG.wipeId
-      ) {
-        const { state: wipedState, wiped } = performBetaWipeIfDue(stateRef.current, currentNow);
-        if (wiped) {
-          saveGame(wipedState);
-          setState(wipedState);
-          if (wipedState.cloudAccount) {
-            saveStateToCloud(
-              wipedState.cloudAccount.uid,
-              wipedState.cloudAccount.displayUsername,
-              wipedState
-            );
-          }
-          handleNotify(
-            '🚨 MONDAY 1:00 AM BETA RESET COMPLETE!',
-            'All accounts and progress have been wiped for the new Click-Power update!'
-          );
-        }
-      }
+      setNowMs(Date.now());
     }, 1000);
     return () => clearInterval(timer);
   }, []);
@@ -122,10 +136,10 @@ export function App() {
 
   // Mandatory Sign-In: Only show the Sign In popup automatically if the player is NOT signed in!
   useEffect(() => {
-    if (!showIntroCutscene && !state.cloudAccount && !showAccountModal) {
+    if (!showIntroCutscene && !state.cloudAccount && !showAccountModal && !showEscMenu) {
       setShowAccountModal(true);
     }
-  }, [showIntroCutscene, state.cloudAccount, showAccountModal]);
+  }, [showIntroCutscene, state.cloudAccount, showAccountModal, showEscMenu]);
 
   // Detect Matthew Storm wave transitions and event completion
   useEffect(() => {
@@ -140,16 +154,13 @@ export function App() {
       );
       handleNotify(
         '⚡ MATTHEW STORM IS LIVE! ⚡',
-        '6×–15× Surge Waves, Raining Matthews, Giant Matthew & Secret Storm Shop unlocked!'
+        'All-Day Friday 4× Click & CPS Multiplier + Secret Storm Vault unlocked!'
       );
     }
 
     if (prevStatus === 'active' && currStatus === 'ended') {
       setShowStormShop(false);
       setShowStormRecap(true);
-      if (testSimStartMs !== null) {
-        setTestSimStartMs(null);
-      }
     }
 
     prevStormStatusRef.current = currStatus;
@@ -162,14 +173,14 @@ export function App() {
         stateRef.current.unlockedSkins.map((id) => getSkinById(id).image)
       );
       handleNotify(
-        `⚡ STORM WAVE #${currWaveIdx} (${stormState.currentWave?.multiplier}× MULTIPLIER)!`,
-        'Giant Matthew has spawned for 7 seconds — click him fast!'
+        `⚡ STORM WAVE #${currWaveIdx} (${stormState.currentWave?.multiplier}×)!`,
+        'Giant Matthew spawned!'
       );
     }
     prevWaveIndexRef.current = currWaveIdx;
-  }, [stormState.status, stormState.currentWave, testSimStartMs]);
+  }, [stormState.status, stormState.currentWave]);
 
-  // Check uncapped offline earnings on initial mount
+  // Check uncapped offline earnings on initial local mount
   useEffect(() => {
     const nowSec = Math.floor(Date.now() / 1000);
     const { elapsedSeconds, coinsEarned } = calculateOfflineEarnings(
@@ -182,38 +193,70 @@ export function App() {
     }
   }, []);
 
-  // Subscribe to Firebase Auth changes for persistent session restoration
+  // Subscribe to Firebase Auth changes for persistent session restoration + Cloud Offline Earnings
   useEffect(() => {
     const unsubscribe = subscribeToAuthChanges(async (profile) => {
       if (!profile) return;
-      const merged = await loadAndReconcileCloudSave(
-        profile.uid,
-        profile.username,
-        stateRef.current
-      );
-      setState((prev) => {
-        const { state: checkedPrev } = performBetaWipeIfDue(prev, Date.now());
-        const next: GameState = {
-          ...merged,
-          coins: Math.max(checkedPrev.coins, merged.coins),
-          cloudAccount: {
-            uid: profile.uid,
-            username: profile.username,
-            displayUsername: profile.username,
-            lastCloudSync: Date.now(),
-          },
-        };
-        saveGame(next);
-        return next;
-      });
+      isReconcilingCloudRef.current = true;
+      try {
+        const merged = await loadAndReconcileCloudSave(
+          profile.uid,
+          profile.username,
+          stateRef.current
+        );
+
+        // Award offline earnings for older/cloud accounts based on their cloud save timestamp!
+        if (offlineCheckedForUidRef.current !== profile.uid) {
+          offlineCheckedForUidRef.current = profile.uid;
+          const nowSec = Math.floor(Date.now() / 1000);
+          const { elapsedSeconds, coinsEarned } = calculateOfflineEarnings(
+            merged,
+            nowSec,
+            getActiveSeason().seasonId
+          );
+          if (elapsedSeconds > 15 && coinsEarned > 0) {
+            setOfflineData((prev) =>
+              !prev || coinsEarned > prev.coins
+                ? { elapsed: elapsedSeconds, coins: coinsEarned }
+                : prev
+            );
+          }
+        }
+
+        setState((prev) => {
+          const { state: checkedPrev } = performBetaWipeIfDue(prev, Date.now());
+          const useMerged =
+            merged.prestigeCount > checkedPrev.prestigeCount ||
+            (merged.prestigeCount === checkedPrev.prestigeCount &&
+              merged.lifetimeCoins >= checkedPrev.lifetimeCoins);
+
+          const next: GameState = {
+            ...(useMerged ? merged : checkedPrev),
+            unlockedSkins: Array.from(
+              new Set([...checkedPrev.unlockedSkins, ...merged.unlockedSkins])
+            ),
+            lastSaveTime: Date.now(),
+            cloudAccount: {
+              uid: profile.uid,
+              username: profile.username,
+              displayUsername: profile.username,
+              lastCloudSync: Date.now(),
+            },
+          };
+          saveGame(next);
+          return next;
+        });
+      } finally {
+        isReconcilingCloudRef.current = false;
+      }
     });
     return () => unsubscribe();
   }, []);
 
   // Fast 10-second Realtime Database Leaderboard + Progress sync while actively playing
-  // (powered by stateless Firebase Realtime Database REST with unlimited daily writes!)
   useEffect(() => {
     const fastLeaderboardSync = () => {
+      if (isReconcilingCloudRef.current) return;
       const curr = stateRef.current;
       if (!curr.cloudAccount) return;
       const isRecentlyActive = Date.now() - (curr.lastActiveInputTimestamp || 0) < 20000;
@@ -226,6 +269,7 @@ export function App() {
     };
 
     const deepProfileBackup = () => {
+      if (isReconcilingCloudRef.current) return;
       const curr = stateRef.current;
       if (!curr.cloudAccount) return;
       const isRecentlyActive = Date.now() - (curr.lastActiveInputTimestamp || 0) < 45000;
@@ -241,7 +285,7 @@ export function App() {
     const deepInterval = setInterval(deepProfileBackup, 30000);
 
     const onVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
+      if (document.visibilityState === 'hidden' && !isReconcilingCloudRef.current) {
         const curr = stateRef.current;
         if (curr.cloudAccount) {
           saveStateToCloud(
@@ -281,7 +325,7 @@ export function App() {
             stateRef.current.unlockedSkins.map((id) => getSkinById(id).image)
           );
           soundManager.playSkinUnlock();
-          handleNotify('EASTER EGG: MATTHEW RAIN!', 'Raining your unlocked Matthews from the sky!');
+          handleNotify('EASTER EGG: MATTHEW RAIN!', 'Raining your unlocked Matthews!');
           buffer = '';
         }
       }
@@ -320,7 +364,10 @@ export function App() {
   });
 
   const handleEarnCoins = (amount: number, isClick: boolean, isCrit: boolean) => {
+    if (seasonInfo.isDowntime) return;
+
     let unlockedSkinsNow: { id: string; name: string }[] = [];
+    let autoClaimedQuestsNow: { title: string; rewardGems: number; rewardCoins: number }[] = [];
 
     setState((prev) => {
       const nextCombo = isClick ? Math.min(prev.combo + 1, BALANCE.click.comboMax) : prev.combo;
@@ -330,6 +377,9 @@ export function App() {
         lifetimeCoins: prev.lifetimeCoins + amount,
         seasonalScore: prev.seasonalScore + amount,
         clicks: isClick ? prev.clicks + 1 : prev.clicks,
+        lifetimeAllSeasonsClicks: isClick
+          ? Math.max((prev.lifetimeAllSeasonsClicks || 0) + 1, prev.clicks + 1)
+          : prev.lifetimeAllSeasonsClicks,
         criticalClicks: isCrit ? prev.criticalClicks + 1 : prev.criticalClicks,
         combo: nextCombo,
         maxComboReached: Math.max(prev.maxComboReached || 0, nextCombo),
@@ -337,11 +387,20 @@ export function App() {
         lastActiveInputTimestamp: Date.now(),
       };
 
-      const cps = calculateCPS(baseNext, {
+      const { state: questState, newlyClaimed } = checkAndAutoClaimQuests(baseNext);
+      if (newlyClaimed.length > 0) {
+        autoClaimedQuestsNow = newlyClaimed.map((q) => ({
+          title: q.title,
+          rewardGems: q.rewardGems,
+          rewardCoins: q.rewardCoins,
+        }));
+      }
+
+      const cps = calculateCPS(questState, {
         fridayBonusActive: fridayBonus,
         stormWaveMultiplier,
       });
-      const unlockCheck = checkAndApplyMilestoneUnlocks(baseNext, cps);
+      const unlockCheck = checkAndApplyMilestoneUnlocks(questState, cps);
       if (unlockCheck.newlyUnlocked.length > 0) {
         unlockedSkinsNow = unlockCheck.newlyUnlocked.map((s) => ({
           id: s.id,
@@ -351,8 +410,22 @@ export function App() {
         return unlockCheck.state;
       }
 
-      return baseNext;
+      if (newlyClaimed.length > 0) {
+        saveGame(questState);
+      }
+
+      return questState;
     });
+
+    if (autoClaimedQuestsNow.length > 0) {
+      soundManager.playBuy();
+      autoClaimedQuestsNow.forEach((q) => {
+        handleNotify(
+          '🎯 QUEST AUTO-CLAIMED!',
+          `${q.title}: +${q.rewardGems} 💎 & +${formatNumber(q.rewardCoins)} MC!`
+        );
+      });
+    }
 
     if (unlockedSkinsNow.length > 0) {
       soundManager.playSkinUnlock();
@@ -362,7 +435,7 @@ export function App() {
         stateRef.current.unlockedSkins.map((id) => getSkinById(id).image)
       );
       unlockedSkinsNow.forEach((skin) => {
-        handleNotify('NEW MATTHEW UNLOCKED!', `${skin.name} automatically equipped!`);
+        handleNotify('NEW MATTHEW UNLOCKED!', `${skin.name} equipped!`);
       });
     }
   };
@@ -379,7 +452,6 @@ export function App() {
 
   const handleCompleteIntro = () => {
     setShowIntroCutscene(false);
-    // Only show the Sign In / Create Account popup if the player is NOT already signed in!
     if (!stateRef.current.cloudAccount) {
       setShowAccountModal(true);
     }
@@ -405,12 +477,12 @@ export function App() {
         onSpawnBonus={(text) => handleNotify('BONUS EVENT!', text)}
       />
 
-      {/* POPUP NOTIFICATIONS */}
-      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-xs w-full pointer-events-none px-3">
+      {/* TOP NOTIFICATION BANNERS (Auto-Claimed Quests, Unlocks, Events) */}
+      <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[95] flex flex-col gap-2 max-w-md w-full pointer-events-none px-3">
         {notifications.map((n) => (
           <div
             key={n.id}
-            className="pointer-events-auto flex items-center justify-between p-3 rounded-2xl bg-slate-900/95 border-2 border-amber-400 shadow-2xl backdrop-blur-md"
+            className="pointer-events-auto flex items-center justify-between p-3.5 rounded-2xl bg-slate-900/95 border-2 border-amber-400 shadow-[0_0_30px_rgba(251,191,36,0.35)] backdrop-blur-md animate-fade-in"
           >
             <div className="flex items-center gap-2.5">
               <Sparkles className="w-5 h-5 text-amber-400 shrink-0" />
@@ -435,20 +507,10 @@ export function App() {
           state={state}
           setState={setState}
           onEarnCoins={handleEarnCoins}
-          onOpenSettings={() => setShowSettings(true)}
+          onOpenSettings={() => setShowEscMenu(true)}
           onOpenAccount={() => setShowAccountModal(true)}
           onOpenLeaderboard={() => setShowLeaderboardModal(true)}
           onOpenStormShop={() => setShowStormShop(true)}
-          onStartStormTest={() => {
-            const startNow = Date.now();
-            setTestSimStartMs(startNow);
-            setNowMs(startNow);
-          }}
-          onStopStormTest={() => {
-            setShowStormShop(false);
-            setTestSimStartMs(null);
-            setShowStormRecap(true);
-          }}
           onNotify={handleNotify}
           fridayBonusActive={fridayBonus}
           stormState={stormState}
@@ -483,28 +545,39 @@ export function App() {
         </div>
       </div>
 
-      {/* SETTINGS MODAL */}
-      {showSettings && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className="relative w-full max-w-2xl max-h-[90vh] bg-[#13172b] border-2 border-slate-700 rounded-3xl p-5 overflow-y-auto shadow-2xl">
-            <button
-              onClick={() => setShowSettings(false)}
-              className="absolute top-4 right-4 w-9 h-9 rounded-full bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center cursor-pointer transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
-            <SettingsModal state={state} setState={setState} />
-          </div>
-        </div>
-      )}
+      {/* WEEKEND SEASON DOWNTIME OVERLAY (Active Saturday 12:00 AM -> Monday 12:00 AM after Friday Live Event) */}
+      <SeasonDowntimeModal
+        isOpen={!showIntroCutscene && seasonInfo.isDowntime}
+        state={state}
+        seasonNumber={seasonInfo.seasonNumber}
+        downtimeRemainingSeconds={seasonInfo.downtimeRemainingSeconds}
+        onOpenLeaderboard={() => setShowLeaderboardModal(true)}
+        onOpenSkins={() => setShowSkinQualityModal(true)}
+        onOpenEscMenu={() => setShowEscMenu(true)}
+      />
 
-      {/* VIEW ALL SKINS MODAL (Excludes secret storm skins) */}
+      {/* FULL-SCREEN ESC GAME MENU (Hub + Account + Settings) */}
+      <EscMenuModal
+        isOpen={showEscMenu}
+        onClose={() => setShowEscMenu(false)}
+        state={state}
+        setState={setState}
+        onOpenLeaderboard={() => setShowLeaderboardModal(true)}
+        onOpenSkins={() => setShowSkinQualityModal(true)}
+        onOpenStormShop={() => setShowStormShop(true)}
+        isStormActive={isStormActive}
+        seasonLabel={seasonLabel}
+        onNotify={handleNotify}
+      />
+
+      {/* VIEW ALL SKINS MODAL (Only active season's skins — no spoilers!) */}
       <SkinQualityModal
         isOpen={showSkinQualityModal}
         onClose={() => setShowSkinQualityModal(false)}
         equippedSkinId={state.equippedSkin}
         unlockedSkinIds={state.unlockedSkins}
         onEquipSkin={handleEquipSkin}
+        currentSeasonId={state.currentSeasonId}
       />
 
       {/* UNIFIED SIGN IN / CREATE ACCOUNT MODAL */}
@@ -516,7 +589,7 @@ export function App() {
         onNotify={handleNotify}
       />
 
-      {/* WORLDWIDE SEASONAL LEADERBOARD MODAL (Click any player to inspect stats & skins) */}
+      {/* WORLDWIDE SEASONAL LEADERBOARD MODAL */}
       <LeaderboardModal
         isOpen={showLeaderboardModal}
         onClose={() => setShowLeaderboardModal(false)}
@@ -539,7 +612,7 @@ export function App() {
         onNotify={handleNotify}
       />
 
-      {/* SLEEK LOADING SCREEN ANIMATION */}
+      {/* UPGRADED LOADING SCREEN ANIMATION (Click PLAY to Start) */}
       <IntroCutsceneModal isOpen={showIntroCutscene} onComplete={handleCompleteIntro} />
 
       {/* OFFLINE EARNINGS POPUP */}

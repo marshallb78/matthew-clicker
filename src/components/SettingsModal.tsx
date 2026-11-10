@@ -245,9 +245,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-              <span className="text-[10px] uppercase font-bold text-slate-400">Total Clicks</span>
+              <span className="text-[10px] uppercase font-bold text-slate-400">
+                Lifetime Clicks (All Seasons)
+              </span>
               <p className="text-base font-extrabold text-cyan-400 mt-0.5">
-                {formatNumber(state.clicks)}
+                {formatNumber(Math.max(state.lifetimeAllSeasonsClicks || 0, state.clicks))}
               </p>
             </div>
 

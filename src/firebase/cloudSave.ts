@@ -9,7 +9,7 @@ import {
   saveGame,
 } from '../utils/storage';
 import { getActiveSeason } from '../utils/scheduleEngine';
-import { MATTHEW_STORM_SKINS, equipSkin, isValidSkinId } from '../data/skins';
+import { ALL_STORM_SKINS, equipSkin, isValidSkinId } from '../data/skins';
 import { GEM_ECONOMY_CONFIG } from '../config/gameConfig';
 import { updateLeaderboardEntry } from './leaderboard';
 
@@ -77,58 +77,28 @@ export async function loadAndReconcileCloudSave(
       rtdbUser || {},
     ];
 
-    // Pick the cloud source with the highest lifetimeCoins as base seasonal object
+    // Pick the single most progressed seasonal snapshot so multi-device logins never mix
+    // stale coins/upgrades across different devices or roll back recent progress.
     let bestCloudSeason: Record<string, any> = {};
-    let maxCloudLifetimeCoins = 0;
-    let maxCloudCoins = 0;
-    let maxCloudSeasonalScore = 0;
-    let maxCloudClicks = 0;
-    let maxCloudCritClicks = 0;
-    let maxCloudPrestigeCount = 0;
-    let maxCloudPrestigeShards = 0;
-    let maxCloudLifetimeShards = 0;
-    let maxCloudGems = 0;
-    let maxCloudLifetimeGems = 0;
+    let bestCloudPrestige = -1;
+    let bestCloudLifetimeCoins = -1;
+    let bestCloudLastSaveTime = 0;
+
+    let maxCareerPlaytime = localState.totalPlaytimeSeconds || 0;
+    let maxCareerClicks = Math.max(localState.lifetimeAllSeasonsClicks || 0, localState.clicks || 0);
+    let maxCareerCoins = Math.max(
+      localState.lifetimeAllSeasonsCoins || 0,
+      localState.lifetimeCoins || 0
+    );
 
     const allSkins = new Set<string>(['classic_matthew', ...(localState.unlockedSkins || [])]);
     const allPermAch = new Set<string>(localState.permanentAchievements || []);
-    const allUnlockedAch = new Set<string>(localState.unlockedAchievements || []);
     const allClaimedQuests = new Set<string>(localState.claimedQuests || []);
-    const mergedUpgrades: Record<string, number> = { ...(localState.upgrades || {}) };
 
     let cloudEquippedSkin: string | null = null;
 
     for (const src of sources) {
       if (!src || typeof src !== 'object') continue;
-      const lc = typeof src.lifetimeCoins === 'number' ? src.lifetimeCoins : 0;
-      if (lc >= maxCloudLifetimeCoins) {
-        maxCloudLifetimeCoins = lc;
-        bestCloudSeason = { ...bestCloudSeason, ...src };
-      }
-      if (typeof src.coins === 'number') maxCloudCoins = Math.max(maxCloudCoins, src.coins);
-      if (typeof src.seasonalScore === 'number') {
-        maxCloudSeasonalScore = Math.max(maxCloudSeasonalScore, src.seasonalScore);
-      }
-      if (typeof src.clicks === 'number') maxCloudClicks = Math.max(maxCloudClicks, src.clicks);
-      if (typeof src.criticalClicks === 'number') {
-        maxCloudCritClicks = Math.max(maxCloudCritClicks, src.criticalClicks);
-      }
-      if (typeof src.prestigeCount === 'number') {
-        maxCloudPrestigeCount = Math.max(maxCloudPrestigeCount, src.prestigeCount);
-      }
-      if (typeof src.rebirthCount === 'number') {
-        maxCloudPrestigeCount = Math.max(maxCloudPrestigeCount, src.rebirthCount);
-      }
-      if (typeof src.prestigeShards === 'number') {
-        maxCloudPrestigeShards = Math.max(maxCloudPrestigeShards, src.prestigeShards);
-      }
-      if (typeof src.lifetimePrestigeShards === 'number') {
-        maxCloudLifetimeShards = Math.max(maxCloudLifetimeShards, src.lifetimePrestigeShards);
-      }
-      if (typeof src.gems === 'number') maxCloudGems = Math.max(maxCloudGems, src.gems);
-      if (typeof src.lifetimeGems === 'number') {
-        maxCloudLifetimeGems = Math.max(maxCloudLifetimeGems, src.lifetimeGems);
-      }
 
       if (Array.isArray(src.unlockedSkins)) {
         src.unlockedSkins.forEach((id: string) => {
@@ -141,23 +111,78 @@ export async function loadAndReconcileCloudSave(
       if (Array.isArray(src.permanentAchievements)) {
         src.permanentAchievements.forEach((a: string) => allPermAch.add(a));
       }
-      if (Array.isArray(src.unlockedAchievements)) {
-        src.unlockedAchievements.forEach((a: string) => allUnlockedAch.add(a));
-      }
       if (Array.isArray(src.claimedQuests)) {
         src.claimedQuests.forEach((q: string) => allClaimedQuests.add(q));
       }
-      if (src.upgrades && typeof src.upgrades === 'object') {
-        for (const [upId, count] of Object.entries(src.upgrades)) {
-          if (typeof count === 'number') {
-            mergedUpgrades[upId] = Math.max(mergedUpgrades[upId] || 0, count);
-          }
+      if (typeof src.totalPlaytimeSeconds === 'number') {
+        maxCareerPlaytime = Math.max(maxCareerPlaytime, src.totalPlaytimeSeconds);
+      }
+      if (typeof src.lifetimeAllSeasonsClicks === 'number') {
+        maxCareerClicks = Math.max(maxCareerClicks, src.lifetimeAllSeasonsClicks);
+      }
+      if (typeof src.clicks === 'number') {
+        maxCareerClicks = Math.max(maxCareerClicks, src.clicks);
+      }
+      if (typeof src.lifetimeAllSeasonsCoins === 'number') {
+        maxCareerCoins = Math.max(maxCareerCoins, src.lifetimeAllSeasonsCoins);
+      }
+
+      // Evaluate whether this source is from the current season (or legacy season_1 when activeSeason is season_1)
+      const srcSeasonId = src.seasonId || src.currentSeasonId || activeSeason.seasonId;
+      if (srcSeasonId !== activeSeason.seasonId) {
+        continue;
+      }
+
+      const pCount =
+        typeof src.prestigeCount === 'number'
+          ? src.prestigeCount
+          : typeof src.rebirthCount === 'number'
+          ? src.rebirthCount
+          : 0;
+      const lCoins =
+        typeof src.lifetimeCoins === 'number'
+          ? src.lifetimeCoins
+          : typeof src.seasonalScore === 'number'
+          ? src.seasonalScore
+          : 0;
+      const saveTs =
+        typeof src.lastSaveTime === 'number'
+          ? src.lastSaveTime
+          : typeof src.updatedAtMs === 'number'
+          ? src.updatedAtMs
+          : 0;
+
+      const isBetterCloud =
+        pCount > bestCloudPrestige ||
+        (pCount === bestCloudPrestige && lCoins > bestCloudLifetimeCoins) ||
+        (pCount === bestCloudPrestige &&
+          lCoins === bestCloudLifetimeCoins &&
+          saveTs > bestCloudLastSaveTime);
+
+      if (isBetterCloud) {
+        bestCloudPrestige = pCount;
+        bestCloudLifetimeCoins = lCoins;
+        if (saveTs > 0) bestCloudLastSaveTime = saveTs;
+        bestCloudSeason = { ...bestCloudSeason, ...src };
+      } else {
+        // Fill in missing fields from secondary sources without overwriting primary numbers
+        bestCloudSeason = { ...src, ...bestCloudSeason };
+        if (saveTs > bestCloudLastSaveTime && bestCloudLastSaveTime === 0) {
+          bestCloudLastSaveTime = saveTs;
         }
       }
     }
 
     const mergedSkins = Array.from(allSkins);
-    const useCloudBase = maxCloudLifetimeCoins >= (localState.lifetimeCoins || 0);
+    const localInActiveSeason = localState.currentSeasonId === activeSeason.seasonId;
+    const localPrestige = localInActiveSeason ? localState.prestigeCount || 0 : -1;
+    const localLifetimeCoins = localInActiveSeason ? localState.lifetimeCoins || 0 : -1;
+
+    const useCloudBase =
+      bestCloudPrestige > localPrestige ||
+      (bestCloudPrestige === localPrestige && bestCloudLifetimeCoins >= localLifetimeCoins);
+
+    const authoritativeSeason: Record<string, any> = useCloudBase ? bestCloudSeason : localState;
 
     const chosenEquippedSkin =
       useCloudBase && cloudEquippedSkin && mergedSkins.includes(cloudEquippedSkin)
@@ -168,43 +193,103 @@ export async function loadAndReconcileCloudSave(
         ? cloudEquippedSkin
         : 'classic_matthew';
 
+    // Determine the true lastSaveTime so older/cloud accounts properly get offline earnings!
+    const cloudSaveTs =
+      bestCloudLastSaveTime ||
+      (typeof rtdbUser?.updatedAtMs === 'number' ? rtdbUser.updatedAtMs : 0) ||
+      (typeof rtdbLb?.updatedAtMs === 'number' ? rtdbLb.updatedAtMs : 0);
+
+    const effectiveLastSaveTime =
+      useCloudBase && cloudSaveTs > 0
+        ? cloudSaveTs
+        : localState.lastSaveTime || Date.now();
+
     const mergedRaw: Partial<GameState> = {
-      ...(useCloudBase ? bestCloudSeason : localState),
-      coins: Math.max(localState.coins || 0, maxCloudCoins),
-      lifetimeCoins: Math.max(localState.lifetimeCoins || 0, maxCloudLifetimeCoins),
+      ...localState,
+      ...authoritativeSeason,
+      coins:
+        typeof authoritativeSeason.coins === 'number'
+          ? authoritativeSeason.coins
+          : localState.coins || 0,
+      lifetimeCoins: Math.max(
+        typeof authoritativeSeason.lifetimeCoins === 'number'
+          ? authoritativeSeason.lifetimeCoins
+          : 0,
+        typeof authoritativeSeason.seasonalScore === 'number'
+          ? authoritativeSeason.seasonalScore
+          : 0
+      ),
       seasonalScore: Math.max(
-        localState.seasonalScore || 0,
-        maxCloudSeasonalScore,
-        Math.floor(Math.max(localState.lifetimeCoins || 0, maxCloudLifetimeCoins))
+        typeof authoritativeSeason.seasonalScore === 'number'
+          ? authoritativeSeason.seasonalScore
+          : 0,
+        Math.floor(
+          typeof authoritativeSeason.lifetimeCoins === 'number'
+            ? authoritativeSeason.lifetimeCoins
+            : 0
+        )
       ),
-      clicks: Math.max(localState.clicks || 0, maxCloudClicks),
-      criticalClicks: Math.max(localState.criticalClicks || 0, maxCloudCritClicks),
-      prestigeCount: Math.max(localState.prestigeCount || 0, maxCloudPrestigeCount),
-      prestigeShards: Math.max(localState.prestigeShards || 0, maxCloudPrestigeShards),
-      lifetimePrestigeShards: Math.max(
-        localState.lifetimePrestigeShards || 0,
-        maxCloudLifetimeShards
-      ),
-      upgrades: mergedUpgrades,
+      clicks:
+        typeof authoritativeSeason.clicks === 'number'
+          ? authoritativeSeason.clicks
+          : localState.clicks || 0,
+      criticalClicks:
+        typeof authoritativeSeason.criticalClicks === 'number'
+          ? authoritativeSeason.criticalClicks
+          : localState.criticalClicks || 0,
+      prestigeCount:
+        typeof authoritativeSeason.prestigeCount === 'number'
+          ? authoritativeSeason.prestigeCount
+          : typeof authoritativeSeason.rebirthCount === 'number'
+          ? authoritativeSeason.rebirthCount
+          : 0,
+      prestigeShards:
+        typeof authoritativeSeason.prestigeShards === 'number'
+          ? authoritativeSeason.prestigeShards
+          : 0,
+      lifetimePrestigeShards:
+        typeof authoritativeSeason.lifetimePrestigeShards === 'number'
+          ? authoritativeSeason.lifetimePrestigeShards
+          : 0,
+      upgrades:
+        authoritativeSeason.upgrades && typeof authoritativeSeason.upgrades === 'object'
+          ? authoritativeSeason.upgrades
+          : {},
       unlockedSkins: mergedSkins,
       equippedSkin: chosenEquippedSkin,
-      gems: Math.max(localState.gems || 0, maxCloudGems),
-      lifetimeGems: Math.max(localState.lifetimeGems || 0, maxCloudLifetimeGems),
+      gems:
+        typeof authoritativeSeason.gems === 'number'
+          ? authoritativeSeason.gems
+          : typeof rtdbUser?.gems === 'number'
+          ? rtdbUser.gems
+          : localState.gems || 0,
+      lifetimeGems: Math.max(
+        localState.lifetimeGems || 0,
+        typeof rtdbUser?.lifetimeGems === 'number' ? rtdbUser.lifetimeGems : 0
+      ),
+      totalPlaytimeSeconds: maxCareerPlaytime,
+      lifetimeAllSeasonsClicks: maxCareerClicks,
+      lifetimeAllSeasonsCoins: maxCareerCoins,
       permanentAchievements: Array.from(allPermAch),
-      unlockedAchievements: Array.from(allUnlockedAch),
       claimedQuests: Array.from(allClaimedQuests),
       currentSeasonId: activeSeason.seasonId,
+      lastSaveTime: effectiveLastSaveTime,
       settings: {
         ...localState.settings,
       },
     };
 
     const reconciled = sanitizeAndValidateGameState(mergedRaw);
+    // Preserve effectiveLastSaveTime on the returned object so App.tsx can calculate offline earnings!
+    const reconciledWithTimestamp: GameState = {
+      ...reconciled,
+      lastSaveTime: effectiveLastSaveTime,
+    };
     saveGame(reconciled);
 
     // Immediately sync reconciled profile & leaderboard into Realtime Database
     saveStateToCloud(uid, username, reconciled, true).catch(() => {});
-    return reconciled;
+    return reconciledWithTimestamp;
   } catch (err) {
     console.warn('Cloud reconciliation fallback to local state:', err);
     return localState;
@@ -292,7 +377,7 @@ export async function purchaseStormSkinAtomic(
   uid?: string | null,
   username?: string | null
 ): Promise<{ nextState: GameState; success: boolean; error?: string }> {
-  const stormSkin = MATTHEW_STORM_SKINS.find((s) => s.id === skinId);
+  const stormSkin = ALL_STORM_SKINS.find((s) => s.id === skinId);
   if (!stormSkin) {
     return { nextState: state, success: false, error: 'Invalid Matthew Storm skin.' };
   }

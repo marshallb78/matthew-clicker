@@ -9,8 +9,13 @@ export interface ActiveSeasonInfo {
   seasonNumber: number;
   seasonId: string;
   startTimeMs: number;
+  /** End of active gameplay on Friday 11:59:59 PM (when Weekend Downtime begins) */
   endTimeMs: number;
+  /** Monday 12:00 AM when Downtime ends and the next weekly Season launches */
+  nextSeasonStartMs: number;
   remainingMs: number;
+  isDowntime: boolean;
+  downtimeRemainingSeconds: number;
 }
 
 export interface StormWaveInfo {
@@ -33,9 +38,6 @@ export interface MatthewStormState {
   currentWave: StormWaveInfo | null;
 }
 
-/**
- * Deterministic 32-bit hash for synchronized cross-client wave generation
- */
 function seededRandom(seedStr: string): number {
   let h = 2166136261 >>> 0;
   for (let i = 0; i < seedStr.length; i++) {
@@ -51,27 +53,38 @@ function seededRandom(seedStr: string): number {
 }
 
 /**
- * Computes the active 30-day Season deterministically from the authoritative timestamp.
+ * Computes the active 1-Week Season deterministically from the authoritative Monday 00:00 EST anchor.
+ * - Monday 00:00 -> Friday 24:00 (5 days): Active Season Gameplay (with All-Day Friday Live Event on Day 5).
+ * - Saturday 00:00 -> Monday 00:00 (2 days): Weekend Downtime (after Friday Live Event ends until Monday).
  */
 export function getActiveSeason(nowMs: number = Date.now()): ActiveSeasonInfo {
   const elapsedSinceEpoch = Math.max(0, nowMs - SEASON_CONFIG.epochStartMs);
   const seasonIndex = Math.floor(elapsedSinceEpoch / SEASON_CONFIG.durationMs);
   const seasonNumber = seasonIndex + 1;
   const startTimeMs = SEASON_CONFIG.epochStartMs + seasonIndex * SEASON_CONFIG.durationMs;
-  const endTimeMs = startTimeMs + SEASON_CONFIG.durationMs;
-  const remainingMs = Math.max(0, endTimeMs - nowMs);
+  const activePlayEndMs = startTimeMs + SEASON_CONFIG.activePlayDurationMs;
+  const nextSeasonStartMs = startTimeMs + SEASON_CONFIG.durationMs;
+
+  const isDowntime = nowMs >= activePlayEndMs && nowMs < nextSeasonStartMs;
+  const remainingMs = Math.max(0, activePlayEndMs - nowMs);
+  const downtimeRemainingSeconds = isDowntime
+    ? Math.max(0, Math.ceil((nextSeasonStartMs - nowMs) / 1000))
+    : 0;
 
   return {
     seasonNumber,
     seasonId: `season_${seasonNumber}`,
     startTimeMs,
-    endTimeMs,
+    endTimeMs: activePlayEndMs,
+    nextSeasonStartMs,
     remainingMs,
+    isDowntime,
+    downtimeRemainingSeconds,
   };
 }
 
 /**
- * Checks whether it is currently Friday (00:00 Friday to 00:00 Saturday) in the configured timezone.
+ * Checks whether it is currently Friday (00:00 Friday to 00:00 Saturday) in America/New_York.
  */
 export function isFridayBonusActive(nowMs: number = Date.now()): boolean {
   if (!FRIDAY_BONUS_CONFIG.enabled) return false;
@@ -109,8 +122,8 @@ export function getAuthoritativeDateString(nowMs: number = Date.now()): string {
 }
 
 /**
- * Generates deterministic, synchronized waves for an event window so all players
- * experience the exact same wave intervals and 6x-15x multipliers.
+ * Generates deterministic, synchronized waves across the All-Day Friday Live Event window
+ * (24 hours = 86,400 seconds) with a steady 4x multiplier and periodic Giant Matthew spawns.
  */
 export function getSynchronizedWaveAtTime(
   nowMs: number,
@@ -136,60 +149,54 @@ export function getSynchronizedWaveAtTime(
     ? MATTHEW_STORM_CONFIG.devTestWaveDurationMaxSeconds * 1000
     : MATTHEW_STORM_CONFIG.waveDurationMaxSeconds * 1000;
 
-  // First wave starts right away (2s after event start) so players immediately feel the storm multiplier!
-  let cursorMs = eventStartMs + 2000;
-  let waveIndex = 1;
+  // Use a deterministic 90-second slot index so an all-day 24-hour event calculates in O(1) time!
+  const elapsedMs = nowMs - eventStartMs;
+  const slotLengthMs = Math.max(40000, Math.floor((minGap + maxGap + minDur + maxDur) / 2));
+  const waveIndex = Math.floor(elapsedMs / slotLengthMs) + 1;
+  const slotStartMs = eventStartMs + (waveIndex - 1) * slotLengthMs;
 
-  while (cursorMs < eventEndMs && waveIndex <= 200) {
-    const durRand = seededRandom(`${MATTHEW_STORM_CONFIG.eventId}_dur_${waveIndex}_${isTestMode}`);
-    const multRand = seededRandom(`${MATTHEW_STORM_CONFIG.eventId}_mult_${waveIndex}_${isTestMode}`);
-    const gapRand = seededRandom(`${MATTHEW_STORM_CONFIG.eventId}_gap_${waveIndex}_${isTestMode}`);
+  const durRand = seededRandom(`${MATTHEW_STORM_CONFIG.eventId}_dur_${waveIndex}_${isTestMode}`);
+  const multRand = seededRandom(`${MATTHEW_STORM_CONFIG.eventId}_mult_${waveIndex}_${isTestMode}`);
 
-    const durationMs = Math.floor(minDur + durRand * (maxDur - minDur));
-    const waveStartMs = cursorMs;
-    const waveEndMs = Math.min(eventEndMs, waveStartMs + durationMs);
+  const durationMs = Math.floor(minDur + durRand * (maxDur - minDur));
+  const waveStartMs = slotStartMs + 2000;
+  const waveEndMs = Math.min(eventEndMs, waveStartMs + durationMs);
 
-    const minM = MATTHEW_STORM_CONFIG.waveMultiplierMin;
-    const maxM = MATTHEW_STORM_CONFIG.waveMultiplierMax;
-    const multiplier = Math.floor(minM + multRand * (maxM - minM + 1));
+  const minM = MATTHEW_STORM_CONFIG.waveMultiplierMin;
+  const maxM = MATTHEW_STORM_CONFIG.waveMultiplierMax;
+  const multiplier = Math.floor(minM + multRand * (maxM - minM + 1));
 
-    // Giant Matthew spawns 2 seconds into the wave and stays strictly for giantMatthewDurationSeconds (7s)
-    const giantStartMs = waveStartMs + 2000;
-    const giantEndMs = Math.min(
+  const giantStartMs = waveStartMs + 2000;
+  const giantEndMs = Math.min(
+    waveEndMs,
+    giantStartMs + MATTHEW_STORM_CONFIG.giantMatthewDurationSeconds * 1000
+  );
+
+  if (nowMs >= waveStartMs && nowMs < waveEndMs) {
+    return {
+      waveIndex,
+      isActive: true,
+      waveStartMs,
       waveEndMs,
-      giantStartMs + MATTHEW_STORM_CONFIG.giantMatthewDurationSeconds * 1000
-    );
-
-    if (nowMs >= waveStartMs && nowMs < waveEndMs) {
-      return {
-        waveIndex,
-        isActive: true,
-        waveStartMs,
-        waveEndMs,
-        remainingWaveSeconds: Math.max(0, Math.ceil((waveEndMs - nowMs) / 1000)),
-        multiplier,
-        giantMatthewAvailable: nowMs >= giantStartMs && nowMs < giantEndMs,
-        giantMatthewWindowEndMs: giantEndMs,
-      };
-    }
-
-    const nextGapMs = Math.floor(minGap + gapRand * (maxGap - minGap));
-    cursorMs = waveEndMs + nextGapMs;
-    waveIndex++;
+      remainingWaveSeconds: Math.max(0, Math.ceil((waveEndMs - nowMs) / 1000)),
+      multiplier,
+      giantMatthewAvailable: nowMs >= giantStartMs && nowMs < giantEndMs,
+      giantMatthewWindowEndMs: giantEndMs,
+    };
   }
 
   return null;
 }
 
 /**
- * Evaluates the complete Matthew Storm event state for either the authoritative production schedule
- * or an active 10-minute isolated developer test session.
+ * Evaluates the recurring Weekly Friday Matthew Storm event state.
+ * Every week, the event runs ALL DAY FRIDAY (00:00 to 24:00 EST) with a 4x multiplier,
+ * and once it ends at Friday 24:00, Weekend Season Downtime begins until Monday 00:00!
  */
 export function evaluateMatthewStormState(
   nowMs: number = Date.now(),
   testSessionStartMs: number | null = null
 ): MatthewStormState {
-  // If isolated developer test session is active:
   if (testSessionStartMs !== null) {
     const countdownDurationMs = MATTHEW_STORM_CONFIG.fullscreenCountdownSeconds * 1000;
     const liveStartMs = testSessionStartMs + countdownDurationMs;
@@ -227,29 +234,18 @@ export function evaluateMatthewStormState(
     };
   }
 
-  // Production Schedule: Friday, November 13, 2026, 9:45 AM – 3:00 PM EST
-  const startMs = MATTHEW_STORM_CONFIG.startTimeMs;
-  const endMs = MATTHEW_STORM_CONFIG.endTimeMs;
+  // Compute the current week's Friday 00:00 -> 24:00 window relative to the weekly Season anchor
+  const season = getActiveSeason(nowMs);
+  const startMs = season.startTimeMs + SEASON_CONFIG.fridayEventOffsetStartMs;
+  const endMs = season.startTimeMs + SEASON_CONFIG.fridayEventOffsetEndMs;
   const tenSecBeforeStartMs = startMs - MATTHEW_STORM_CONFIG.fullscreenCountdownSeconds * 1000;
-  const preAnnounceStartMs = startMs - MATTHEW_STORM_CONFIG.preAnnouncementLeadMs;
 
-  if (nowMs < preAnnounceStartMs) {
-    return {
-      status: 'inactive',
-      isTestMode: false,
-      secondsUntilStart: Math.ceil((startMs - nowMs) / 1000),
-      secondsUntilEnd: Math.ceil((endMs - nowMs) / 1000),
-      shopOpen: false,
-      currentWave: null,
-    };
-  }
-
-  if (nowMs >= preAnnounceStartMs && nowMs < tenSecBeforeStartMs) {
+  if (nowMs < tenSecBeforeStartMs) {
     return {
       status: 'pre_countdown',
       isTestMode: false,
-      secondsUntilStart: Math.max(11, Math.ceil((startMs - nowMs) / 1000)),
-      secondsUntilEnd: Math.ceil((endMs - nowMs) / 1000),
+      secondsUntilStart: Math.max(0, Math.ceil((startMs - nowMs) / 1000)),
+      secondsUntilEnd: Math.max(0, Math.ceil((endMs - nowMs) / 1000)),
       shopOpen: false,
       currentWave: null,
     };
@@ -260,7 +256,7 @@ export function evaluateMatthewStormState(
       status: 'fullscreen_10s_countdown',
       isTestMode: false,
       secondsUntilStart: Math.max(0, Math.ceil((startMs - nowMs) / 1000)),
-      secondsUntilEnd: Math.ceil((endMs - nowMs) / 1000),
+      secondsUntilEnd: Math.max(0, Math.ceil((endMs - nowMs) / 1000)),
       shopOpen: false,
       currentWave: null,
     };

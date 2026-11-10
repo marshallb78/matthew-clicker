@@ -1,6 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GameState, FloatingNumber } from '../types/game';
-import { ALL_SKINS, SKINS, CHARACTER_SKINS, getSkinMilestoneProgress, getSkinById } from '../data/skins';
+import {
+  ALL_SKINS,
+  getProgressionSkinsForSeason,
+  getSkinMilestoneProgress,
+  getSkinById,
+} from '../data/skins';
 import { getAscensionMultiplier } from '../data/prestige';
 import { formatCoins, formatTime } from '../utils/formatters';
 import {
@@ -82,6 +87,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   const characterRef = useRef<HTMLDivElement | null>(null);
   const spriteContainerRef = useRef<HTMLDivElement | null>(null);
   const clickAnimRef = useRef<Animation | null>(null);
+  const lastTouchTimeRef = useRef<number>(0);
 
   const equippedSkin = ALL_SKINS.find((s) => s.id === state.equippedSkin) || ALL_SKINS[0];
   const ascensionMultiplier = getAscensionMultiplier(state.prestigeShards);
@@ -287,23 +293,30 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  const handleClick = (
-    e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>
-  ) => {
-    e.preventDefault();
+  // Unified Pointer Handler:
+  // - Fixes mobile phone 2-4x multi-click bug by using PointerEvents with touch deduplication
+  // - Allows both left-click and right-click on laptop trackpads without opening context menu
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const now = performance.now();
 
-    let clientX = 0;
-    let clientY = 0;
-
-    if ('touches' in e && e.touches.length > 0) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    } else if ('clientX' in e) {
-      clientX = (e as React.MouseEvent<HTMLDivElement>).clientX;
-      clientY = (e as React.MouseEvent<HTMLDivElement>).clientY;
+    if (e.pointerType === 'touch') {
+      // Prevent rapid touch bounce / duplicate touch events on the same press
+      if (now - lastTouchTimeRef.current < 45) {
+        return;
+      }
+      lastTouchTimeRef.current = now;
+    } else if (e.pointerType === 'mouse') {
+      // Ignore synthesized mouse events fired by mobile browsers right after a touch
+      if (now - lastTouchTimeRef.current < 500) {
+        return;
+      }
+      // Allow primary click (0) and trackpad right-click (2)
+      if (e.button !== 0 && e.button !== 2) {
+        return;
+      }
     }
 
-    performMatthewClick(clientX, clientY);
+    performMatthewClick(e.clientX, e.clientY);
   };
 
   // Clickable Giant Rare Matthew during Storm Waves (Image ONLY, disappears after 7s)
@@ -361,8 +374,8 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
     }));
   };
 
-  // --- MILESTONE PROGRESS TRACKING ---
-  const progressionSkins = [...SKINS, ...CHARACTER_SKINS];
+  // --- MILESTONE PROGRESS TRACKING (Season-Aware) ---
+  const progressionSkins = getProgressionSkinsForSeason(state.currentSeasonId);
   const nextLockedSkin = progressionSkins.find((s) => !state.unlockedSkins.includes(s.id));
 
   let nextGoalTitle = 'All Main Skins Unlocked';
@@ -417,10 +430,11 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
 
             <button
               onClick={onOpenSettings}
-              className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-slate-900/85 backdrop-blur-md border-2 border-slate-700/80 hover:border-cyan-400/80 flex items-center justify-center text-slate-300 hover:text-white transition shadow-md active:scale-90 cursor-pointer"
-              title="Settings & Career Stats"
+              className="px-2.5 h-9 sm:h-10 rounded-2xl bg-slate-900/85 backdrop-blur-md border-2 border-slate-700/80 hover:border-cyan-400/80 flex items-center gap-1.5 text-slate-300 hover:text-white transition shadow-md active:scale-90 cursor-pointer"
+              title="Game Menu, Settings & Account (Press ESC)"
             >
               <SettingsIcon className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />
+              <span className="text-[11px] font-black text-cyan-200 hidden sm:inline">Menu (ESC)</span>
             </button>
 
             <button
@@ -645,11 +659,12 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
 
         <div
           ref={characterRef}
-          onMouseDown={handleClick}
-          onTouchStart={handleClick}
+          onPointerDown={handlePointerDown}
+          onContextMenu={(e) => e.preventDefault()}
           className="group relative flex items-center justify-center cursor-pointer select-none transition-transform duration-100 ease-out"
           style={{
             WebkitTapHighlightColor: 'transparent',
+            touchAction: 'manipulation',
             transform: `scale(${zoomScale.toFixed(3)})`,
           }}
         >

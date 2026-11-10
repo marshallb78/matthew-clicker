@@ -18,6 +18,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Lock,
+  Play,
 } from 'lucide-react';
 
 interface AccountModalProps {
@@ -77,12 +78,11 @@ export const AccountModal: React.FC<AccountModalProps> = ({
 
       setState(nextState);
       saveGame(nextState);
-      // Sync to cloud in the background so sign-in finishes immediately and never hangs
       saveStateToCloud(profile.uid, profile.username, nextState, true).catch(() => {});
 
       onNotify(
-        isNewAccount ? 'ACCOUNT CREATED & SIGNED IN!' : 'WELCOME BACK!',
-        `Signed in as ${profile.username}! Progress is synced & protected.`
+        isNewAccount ? 'ACCOUNT CREATED!' : 'WELCOME BACK!',
+        `Signed in as ${profile.username}!`
       );
       setPassword('');
       onClose();
@@ -113,13 +113,11 @@ export const AccountModal: React.FC<AccountModalProps> = ({
           : prev
       );
       if (ok) {
-        setSyncMessage('Cloud save & worldwide leaderboard synced!');
+        setSyncMessage('Synced!');
       } else if (isCloudWriteCoolingDown()) {
-        setSyncMessage(
-          'Saved locally! Cloud server daily write quota is cooling down and will auto-sync your score.'
-        );
+        setSyncMessage('Saved Locally!');
       } else {
-        setSyncMessage('Saved to browser! Cloud sync queued.');
+        setSyncMessage('Saved!');
       }
     } catch (err: unknown) {
       setError((err as Error).message || 'Failed to sync.');
@@ -144,41 +142,36 @@ export const AccountModal: React.FC<AccountModalProps> = ({
         saveGame(next);
         return next;
       });
-      onNotify('SIGNED OUT', 'Sign back in anytime to sync your cloud progress.');
+      onNotify('SIGNED OUT', 'Signed out.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
-      <div className="relative w-full max-w-md bg-[#13172b] border-2 border-emerald-500/60 rounded-3xl p-6 shadow-2xl font-chunky text-slate-100">
-        {state.cloudAccount && (
-          <button
-            onClick={onClose}
-            className="absolute top-4 right-4 w-9 h-9 rounded-full bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center cursor-pointer transition"
-            title="Close"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        )}
+    <div className="fixed inset-0 z-50 w-screen h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-b from-[#0d1429] via-[#090d1b] to-[#050710] font-chunky text-slate-100 select-none overflow-hidden animate-fade-in">
+      {state.cloudAccount && (
+        <button
+          onClick={onClose}
+          className="absolute top-5 right-6 px-4 py-2.5 rounded-2xl bg-slate-900 border-2 border-slate-700 text-slate-200 hover:text-white flex items-center gap-1.5 font-black text-xs uppercase cursor-pointer transition"
+        >
+          <X className="w-5 h-5" />
+          <span>Close</span>
+        </button>
+      )}
 
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-400/50 flex items-center justify-center text-emerald-300">
-            <Cloud className="w-6 h-6" />
-          </div>
-          <div>
-            <h2 className="text-xl font-black text-white">Sign In / Create Account</h2>
-            <p className="text-xs text-slate-400">
-              {state.cloudAccount
-                ? 'Signed in • Auto-saves every 5 seconds'
-                : 'Sign-in required to play & save • Auto-creates if new!'}
-            </p>
-          </div>
+      <div className="w-full max-w-md bg-[#11172e]/95 border-2 border-emerald-400/70 rounded-3xl p-7 shadow-[0_0_60px_rgba(16,185,129,0.25)] text-center">
+        <div className="w-20 h-20 rounded-3xl bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center text-emerald-300 mx-auto mb-3 shadow-[0_0_25px_rgba(16,185,129,0.4)]">
+          <Cloud className="w-10 h-10" />
         </div>
 
+        <h2 className="text-2xl sm:text-3xl font-black text-white uppercase">Matthew Account</h2>
+        <p className="text-xs font-bold text-emerald-300 mt-1 mb-5">
+          {state.cloudAccount ? 'Cloud Sync Active' : 'Enter Username & Password to Play'}
+        </p>
+
         {firebaseInitError && (
-          <div className="p-3 mb-4 rounded-xl bg-amber-950/60 border border-amber-500/50 text-xs text-amber-200 flex items-center gap-2">
+          <div className="p-3 mb-4 rounded-2xl bg-amber-950/60 border border-amber-500/50 text-xs text-amber-200 flex items-center justify-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
             <span>{firebaseInitError}</span>
           </div>
@@ -186,39 +179,31 @@ export const AccountModal: React.FC<AccountModalProps> = ({
 
         {state.cloudAccount ? (
           <div className="space-y-4">
-            <div className="p-4 rounded-2xl bg-slate-900 border border-emerald-500/40 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-400 font-bold">Active Account</span>
-                <span className="text-sm font-black text-emerald-300 flex items-center gap-1">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-4 rounded-2xl bg-slate-950 border border-emerald-500/40">
+                <span className="text-[10px] text-slate-400 font-black uppercase">Player</span>
+                <p className="text-base font-black text-emerald-300 mt-1 flex items-center justify-center gap-1">
                   <ShieldCheck className="w-4 h-4" />
                   {state.cloudAccount.displayUsername}
-                </span>
+                </p>
               </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-400">Unlocked Skins Synced</span>
-                <span className="text-amber-300 font-black">{state.unlockedSkins.length}</span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-400">Permanent Gems Synced</span>
-                <span className="text-fuchsia-300 font-black">{state.gems} 💎</span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-400">Auto-Save Status</span>
-                <span className="text-cyan-300 font-mono">
-                  Every 5s (Last: {new Date(state.cloudAccount.lastCloudSync).toLocaleTimeString()})
-                </span>
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800">
+                <span className="text-[10px] text-slate-400 font-black uppercase">Skins</span>
+                <p className="text-base font-black text-amber-300 mt-1">
+                  {state.unlockedSkins.length} Matthews
+                </p>
               </div>
             </div>
 
             {syncMessage && (
-              <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-xs text-emerald-200 flex items-center gap-2">
+              <div className="p-3 rounded-2xl bg-emerald-950/60 border border-emerald-500/40 text-xs text-emerald-200 flex items-center justify-center gap-2 font-black">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                 <span>{syncMessage}</span>
               </div>
             )}
 
             {error && (
-              <div className="p-3 rounded-xl bg-red-950/60 border border-red-500/40 text-xs text-red-200 flex items-center gap-2">
+              <div className="p-3 rounded-2xl bg-red-950/60 border border-red-500/40 text-xs text-red-200 flex items-center justify-center gap-2 font-black">
                 <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
                 <span>{error}</span>
               </div>
@@ -228,74 +213,57 @@ export const AccountModal: React.FC<AccountModalProps> = ({
               <button
                 onClick={handleManualSync}
                 disabled={loading}
-                className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-50"
+                className="flex-1 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase flex items-center justify-center gap-1.5 cursor-pointer transition disabled:opacity-50 btn-chunky"
               >
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                <span>{loading ? 'Syncing...' : 'Sync Now'}</span>
+                <span>Sync</span>
               </button>
 
               <button
                 onClick={onClose}
-                className="px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs cursor-pointer transition"
+                className="flex-1 py-3 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black text-xs uppercase flex items-center justify-center gap-1.5 cursor-pointer transition btn-chunky"
               >
-                Play Now
+                <Play className="w-4 h-4 fill-slate-950" />
+                <span>Play</span>
               </button>
 
               <button
                 onClick={handleLogout}
                 disabled={loading}
-                className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition"
+                className="px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-black text-xs flex items-center gap-1.5 cursor-pointer transition"
               >
                 <LogOut className="w-4 h-4 text-red-400" />
-                <span>Sign Out</span>
               </button>
             </div>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-750 text-xs text-slate-300 leading-relaxed">
-              Enter your <strong className="text-emerald-300">Username</strong> and{' '}
-              <strong className="text-emerald-300">Password</strong>. If you don&apos;t have an
-              account yet, it will <strong className="text-white">automatically create one</strong>{' '}
-              for you. If you already have one, it signs you right in!
+            <div className="relative">
+              <User className="w-5 h-5 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                required
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Username"
+                className="w-full bg-slate-950 border-2 border-slate-800 rounded-2xl pl-11 pr-4 py-3.5 text-sm font-bold text-white focus:outline-none focus:border-emerald-400"
+              />
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1">
-                Username (3–20 letters, numbers, _)
-              </label>
-              <div className="relative">
-                <User className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  required
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Enter your username..."
-                  className="w-full bg-slate-950 border border-slate-750 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-400"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1">
-                Password (min 6 characters)
-              </label>
-              <div className="relative">
-                <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full bg-slate-950 border border-slate-750 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-400"
-                />
-              </div>
+            <div className="relative">
+              <Lock className="w-5 h-5 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password"
+                className="w-full bg-slate-950 border-2 border-slate-800 rounded-2xl pl-11 pr-4 py-3.5 text-sm font-bold text-white focus:outline-none focus:border-emerald-400"
+              />
             </div>
 
             {error && (
-              <div className="p-3 rounded-xl bg-red-950/60 border border-red-500/40 text-xs text-red-200 flex items-center gap-2">
+              <div className="p-3 rounded-2xl bg-red-950/60 border border-red-500/40 text-xs text-red-200 flex items-center justify-center gap-2 font-black">
                 <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
                 <span>{error}</span>
               </div>
@@ -304,9 +272,9 @@ export const AccountModal: React.FC<AccountModalProps> = ({
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:brightness-110 text-slate-950 font-black text-xs uppercase tracking-wider shadow-lg cursor-pointer transition disabled:opacity-50"
+              className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:brightness-110 text-slate-950 font-black text-sm uppercase tracking-wider shadow-lg cursor-pointer transition disabled:opacity-50 btn-chunky"
             >
-              {loading ? 'Signing In / Creating Account...' : 'Sign In / Create Account'}
+              {loading ? 'Loading...' : 'Play Now'}
             </button>
           </form>
         )}

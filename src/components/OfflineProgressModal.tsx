@@ -22,41 +22,32 @@ export const OfflineProgressModal: React.FC<OfflineProgressModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-      <div className="bg-slate-900 border border-cyan-500/40 rounded-3xl p-6 max-w-sm w-full shadow-2xl text-center relative overflow-hidden">
-        {/* Glow behind */}
-        <div className="absolute -top-12 -left-12 w-40 h-40 rounded-full bg-cyan-500/20 blur-2xl pointer-events-none" />
-
-        <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-cyan-500 to-purple-600 p-1 mx-auto mb-4 flex items-center justify-center shadow-lg shadow-cyan-500/30">
-          <Moon className="w-8 h-8 text-white" />
+    <div className="fixed inset-0 z-50 w-screen h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-b from-[#0c1329] via-[#070b18] to-[#04060e] font-chunky text-white select-none animate-fade-in">
+      <div className="w-full max-w-md bg-[#111830] border-2 border-cyan-400/70 rounded-3xl p-8 shadow-[0_0_60px_rgba(34,211,238,0.25)] text-center relative overflow-hidden">
+        <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-cyan-500 to-purple-600 p-1 mx-auto mb-4 flex items-center justify-center shadow-lg shadow-cyan-500/30">
+          <Moon className="w-10 h-10 text-white" />
         </div>
 
-        <h3 className="text-xl font-black text-slate-100 font-display">Welcome Back!</h3>
-        <p className="text-xs text-slate-400 mt-1">
-          While you were away for <strong className="text-cyan-400">{formatTime(elapsedSeconds)}</strong>, Matthew's empire
-          kept mining coins for you!
-        </p>
+        <h3 className="text-2xl sm:text-3xl font-black text-white uppercase">Offline Earnings</h3>
+        <span className="inline-block mt-1 px-3 py-0.5 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-xs font-black text-cyan-300">
+          Away for {formatTime(elapsedSeconds)}
+        </span>
 
-        {/* REWARD AMOUNT */}
-        <div className="my-5 p-4 rounded-2xl bg-slate-950/80 border border-slate-800 flex flex-col items-center">
-          <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
-            <Sparkles className="w-3 h-3 text-yellow-400" />
-            Offline Earnings
-          </span>
-          <p className="text-3xl font-black text-yellow-300 mt-1 drop-shadow-[0_0_8px_rgba(255,215,0,0.5)]">
+        <div className="my-6 p-6 rounded-3xl bg-slate-950/90 border-2 border-amber-400/50 flex flex-col items-center shadow-inner">
+          <Sparkles className="w-5 h-5 text-yellow-300 mb-1" />
+          <p className="text-4xl sm:text-5xl font-black text-yellow-300 drop-shadow-[0_0_16px_rgba(255,215,0,0.6)]">
             +{formatCoins(coinsEarned)}
           </p>
         </div>
 
         <button
           onClick={handleClaim}
-          className="w-full py-3 rounded-xl font-extrabold text-xs uppercase tracking-wider bg-gradient-to-r from-yellow-500 via-amber-400 to-yellow-600 hover:brightness-110 active:scale-95 text-slate-950 shadow-lg shadow-amber-500/25 flex items-center justify-center gap-2 cursor-pointer transition"
+          className="w-full py-4 rounded-2xl font-black text-sm uppercase tracking-wider bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-500 hover:brightness-110 active:scale-95 text-slate-950 shadow-lg flex items-center justify-center gap-2 cursor-pointer transition btn-chunky"
         >
-          <Check className="w-4 h-4 stroke-[3]" />
-          Claim Coins
+          <Check className="w-5 h-5 stroke-[3]" />
+          <span>Claim Coins</span>
         </button>
       </div>
     </div>
   );
 };
-

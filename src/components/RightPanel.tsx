@@ -111,7 +111,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
     });
   };
 
-  // --- REBIRTH (CAPYBARA CLICKER STYLE ASCENSION MULTIPLIER: +0.05× PER STEP) ---
+  // --- REBIRTH (CAPYBARA CLICKER STYLE ASCENSION MULTIPLIER: +0.08× PER STEP) ---
   const currentAscensionMult = getAscensionMultiplier(state.prestigeShards);
   const potentialBonus = calculatePrestigeShards(state.lifetimeCoins);
   const multGain = Math.max(0, potentialBonus - state.lifetimePrestigeShards);
@@ -482,36 +482,33 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           </div>
         )}
 
-        {/* ================= REBIRTH TAB (CAPYBARA STYLE ASCENSION MULTIPLIER) ================= */}
+        {/* ================= REBIRTH TAB (VISUAL ASCENSION MULTIPLIER) ================= */}
         {activeTab === 'rebirth' && (
           <div className="flex-1 overflow-y-auto p-4 flex flex-col justify-center">
             <div className="text-center p-5 rounded-3xl bg-slate-900/90 border-2 border-purple-500/40 shadow-xl">
-              <div className="w-16 h-16 rounded-full bg-purple-600/20 border-2 border-purple-400 p-3 mx-auto mb-3 flex items-center justify-center text-purple-300 shadow-[0_0_30px_rgba(168,85,247,0.4)]">
+              <div className="w-16 h-16 rounded-2xl bg-purple-600/20 border-2 border-purple-400 p-3 mx-auto mb-3 flex items-center justify-center text-purple-300 shadow-[0_0_30px_rgba(168,85,247,0.4)]">
                 <InfinityIcon className="w-9 h-9" />
               </div>
               <h3 className="text-2xl font-black text-white uppercase tracking-wide">
                 Ascension Rebirth
               </h3>
-              <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
-                Rebirthing resets your current coins and upgrades in exchange for a permanent{' '}
-                <strong className="text-yellow-300">Ascension Multiplier</strong> that multiplies{' '}
-                <strong className="text-cyan-300">EVERYTHING</strong> (all Click Power &amp; Coins
-                Per Second)! Your unlocked Matthew Skins and Gems never reset.
-              </p>
+              <span className="inline-block mt-1 px-3 py-0.5 rounded-full bg-purple-500/20 border border-purple-400/40 text-[11px] font-black text-purple-200 uppercase">
+                Multiplies All Clicks &amp; CPS • Skins Stay Forever
+              </span>
 
               <div className="my-5 grid grid-cols-2 gap-3">
-                <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800">
+                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800">
                   <span className="text-[10px] text-slate-400 uppercase font-black">
-                    Current Multiplier
+                    Current
                   </span>
                   <p className="text-2xl font-black text-purple-300 mt-1">
                     {currentAscensionMult.toFixed(2)}×
                   </p>
                 </div>
 
-                <div className="p-3.5 rounded-2xl bg-slate-950 border border-yellow-400/40">
-                  <span className="text-[10px] text-slate-400 uppercase font-black">
-                    After Rebirth
+                <div className="p-4 rounded-2xl bg-slate-950 border-2 border-yellow-400/50">
+                  <span className="text-[10px] text-yellow-300 uppercase font-black">
+                    Next Rebirth
                   </span>
                   <p className="text-2xl font-black text-yellow-300 mt-1">
                     {nextAscensionMult.toFixed(2)}×{' '}
@@ -523,15 +520,15 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               <button
                 onClick={handleRebirth}
                 disabled={!canRebirth}
-                className={`w-full py-3.5 rounded-2xl font-black text-sm uppercase tracking-wider btn-chunky transition ${
+                className={`w-full py-3.5 rounded-2xl font-black text-xs sm:text-sm uppercase tracking-wider btn-chunky transition ${
                   canRebirth
                     ? 'bg-gradient-to-r from-purple-600 via-fuchsia-500 to-amber-400 hover:brightness-110 text-slate-950 cursor-pointer shadow-lg shadow-purple-500/30'
-                    : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                    : 'bg-slate-800 text-slate-400 border border-slate-700 cursor-not-allowed'
                 }`}
               >
                 {canRebirth
-                  ? `Rebirth Now → ${nextAscensionMult.toFixed(2)}× Ascension Multiplier`
-                  : `Next +0.05× Tier at ${formatCoins(nextRebirthReqCoins)} Lifetime (${formatCoins(state.lifetimeCoins)} / ${formatCoins(nextRebirthReqCoins)})`}
+                  ? `Rebirth → ${nextAscensionMult.toFixed(2)}×`
+                  : `${formatCoins(state.lifetimeCoins)} / ${formatCoins(nextRebirthReqCoins)}`}
               </button>
             </div>
           </div>
@@ -570,10 +567,15 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
             {/* DAILY QUESTS */}
             <div>
-              <h3 className="text-sm font-black text-amber-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <Zap className="w-4 h-4 text-amber-400" />
-                <span>Daily Quests</span>
-              </h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-black text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Zap className="w-4 h-4 text-amber-400" />
+                  <span>Daily Quests</span>
+                </h3>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/50 text-[10px] font-black text-emerald-300 uppercase">
+                  ⚡ Auto-Claims at 100%
+                </span>
+              </div>
               <div className="space-y-2">
                 {dailyQuests.map((quest) => {
                   const isClaimed = state.claimedQuests.includes(quest.id);
@@ -584,7 +586,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                       key={quest.id}
                       className={`p-3 rounded-2xl border ${
                         isClaimed
-                          ? 'bg-slate-900/50 border-slate-800 opacity-60'
+                          ? 'bg-slate-900/50 border-emerald-500/30 opacity-75'
                           : prog.isComplete
                           ? 'bg-[#1a2442] border-amber-400'
                           : 'bg-slate-900/90 border-slate-800'
@@ -592,16 +594,20 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
-                          <span className="font-black text-xs text-white">{quest.title}</span>
-                          <p className="text-[10px] text-slate-400">{quest.description}</p>
-                          <p className="text-[10px] font-bold text-cyan-300 mt-0.5">
-                            Reward: +{quest.rewardGems} 💎 &amp; +{formatCoins(quest.rewardCoins || 0)} Coins
-                          </p>
+                          <span className="font-black text-xs text-white truncate block">{quest.title}</span>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className="px-2 py-0.5 rounded-lg bg-fuchsia-500/20 border border-fuchsia-400/40 text-[10px] font-black text-fuchsia-300">
+                              +{quest.rewardGems} 💎
+                            </span>
+                            <span className="px-2 py-0.5 rounded-lg bg-amber-500/20 border border-amber-400/40 text-[10px] font-black text-amber-300">
+                              +{formatCoins(quest.rewardCoins || 0)}
+                            </span>
+                          </div>
                         </div>
 
                         {isClaimed ? (
-                          <span className="text-[10px] font-black text-emerald-400 flex items-center gap-1 shrink-0">
-                            <Check className="w-3.5 h-3.5" /> Claimed
+                          <span className="text-[10px] font-black text-emerald-400 flex items-center gap-1 shrink-0 bg-emerald-950/70 px-2.5 py-1 rounded-xl border border-emerald-500/40">
+                            <Check className="w-3.5 h-3.5" /> Auto-Claimed
                           </span>
                         ) : (
                           <button
@@ -610,10 +616,10 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                             className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition shrink-0 ${
                               prog.isComplete
                                 ? 'bg-amber-400 text-slate-950 cursor-pointer shadow'
-                                : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                                : 'bg-slate-800 text-slate-400 cursor-default'
                             }`}
                           >
-                            {prog.isComplete ? `Claim (+${quest.rewardGems}💎)` : `${prog.percent}%`}
+                            {prog.isComplete ? `Claim (+${quest.rewardGems}💎)` : `Auto • ${prog.percent}%`}
                           </button>
                         )}
                       </div>
@@ -633,10 +639,15 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
             {/* SEASON QUESTS */}
             <div className="pb-6">
-              <h3 className="text-sm font-black text-cyan-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <Gem className="w-4 h-4 text-cyan-400" />
-                <span>Season Quests</span>
-              </h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-black text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Gem className="w-4 h-4 text-cyan-400" />
+                  <span>Season Quests</span>
+                </h3>
+                <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 border border-cyan-400/50 text-[10px] font-black text-cyan-300 uppercase">
+                  ⚡ Auto-Claims at 100%
+                </span>
+              </div>
               <div className="space-y-2">
                 {seasonalQuests.map((quest) => {
                   const isClaimed = state.claimedQuests.includes(quest.id);
@@ -647,7 +658,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                       key={quest.id}
                       className={`p-3 rounded-2xl border ${
                         isClaimed
-                          ? 'bg-slate-900/50 border-slate-800 opacity-60'
+                          ? 'bg-slate-900/50 border-emerald-500/30 opacity-75'
                           : prog.isComplete
                           ? 'bg-[#1a2442] border-cyan-400'
                           : 'bg-slate-900/90 border-slate-800'
@@ -655,16 +666,20 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
-                          <span className="font-black text-xs text-white">{quest.title}</span>
-                          <p className="text-[10px] text-slate-400">{quest.description}</p>
-                          <p className="text-[10px] font-bold text-fuchsia-300 mt-0.5">
-                            Reward: +{quest.rewardGems} 💎 &amp; +{formatCoins(quest.rewardCoins || 0)} Coins
-                          </p>
+                          <span className="font-black text-xs text-white truncate block">{quest.title}</span>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className="px-2 py-0.5 rounded-lg bg-fuchsia-500/20 border border-fuchsia-400/40 text-[10px] font-black text-fuchsia-300">
+                              +{quest.rewardGems} 💎
+                            </span>
+                            <span className="px-2 py-0.5 rounded-lg bg-cyan-500/20 border border-cyan-400/40 text-[10px] font-black text-cyan-300">
+                              +{formatCoins(quest.rewardCoins || 0)}
+                            </span>
+                          </div>
                         </div>
 
                         {isClaimed ? (
-                          <span className="text-[10px] font-black text-emerald-400 flex items-center gap-1 shrink-0">
-                            <Check className="w-3.5 h-3.5" /> Claimed
+                          <span className="text-[10px] font-black text-emerald-400 flex items-center gap-1 shrink-0 bg-emerald-950/70 px-2.5 py-1 rounded-xl border border-emerald-500/40">
+                            <Check className="w-3.5 h-3.5" /> Auto-Claimed
                           </span>
                         ) : (
                           <button
@@ -673,10 +688,10 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                             className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition shrink-0 ${
                               prog.isComplete
                                 ? 'bg-cyan-400 text-slate-950 cursor-pointer shadow'
-                                : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                                : 'bg-slate-800 text-slate-400 cursor-default'
                             }`}
                           >
-                            {prog.isComplete ? `Claim (+${quest.rewardGems}💎)` : `${prog.percent}%`}
+                            {prog.isComplete ? `Claim (+${quest.rewardGems}💎)` : `Auto • ${prog.percent}%`}
                           </button>
                         )}
                       </div>

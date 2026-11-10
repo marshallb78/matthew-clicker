@@ -51,7 +51,7 @@ export const QUESTS: Quest[] = [
     type: 'rebirth',
     target: 5,
     rewardGems: 10,
-    rewardCoins: 15000000,
+    rewardCoins: 2500,
   },
 
   // Brutal Season Quests (Long-Term Seasonal Milestones)
@@ -93,7 +93,7 @@ export const QUESTS: Quest[] = [
     type: 'rebirth',
     target: 25,
     rewardGems: 45,
-    rewardCoins: 5000000000,
+    rewardCoins: 50000,
   },
   {
     id: 'season_coins_100t',
@@ -146,4 +146,45 @@ export function getQuestProgress(
   const isComplete = current >= quest.target;
   const percent = quest.target > 0 ? Math.min(100, Math.floor((current / quest.target) * 100)) : 100;
   return { current, target: quest.target, percent, isComplete };
+}
+
+/**
+ * Automatically claims any completed quests immediately so players cannot save
+ * completed quests across a Rebirth to skip early progression.
+ */
+export function checkAndAutoClaimQuests(
+  state: GameState
+): { state: GameState; newlyClaimed: Quest[] } {
+  const claimedSet = new Set(state.claimedQuests || []);
+  const newlyClaimed: Quest[] = [];
+  let addedGems = 0;
+  let addedCoins = 0;
+
+  for (const quest of QUESTS) {
+    if (claimedSet.has(quest.id)) continue;
+    const progress = getQuestProgress(quest, state);
+    if (progress.isComplete) {
+      claimedSet.add(quest.id);
+      newlyClaimed.push(quest);
+      addedGems += quest.rewardGems;
+      addedCoins += quest.rewardCoins;
+    }
+  }
+
+  if (newlyClaimed.length === 0) {
+    return { state, newlyClaimed: [] };
+  }
+
+  return {
+    state: {
+      ...state,
+      gems: state.gems + addedGems,
+      lifetimeGems: state.lifetimeGems + addedGems,
+      coins: state.coins + addedCoins,
+      lifetimeCoins: state.lifetimeCoins + addedCoins,
+      seasonalScore: state.seasonalScore + addedCoins,
+      claimedQuests: Array.from(claimedSet),
+    },
+    newlyClaimed,
+  };
 }

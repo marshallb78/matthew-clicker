@@ -132,6 +132,19 @@ export function performSeasonalRollover(
     lifetimePrestigeShards: 0,
     prestigeUpgrades: {},
 
+    gems: 0,
+    activePlaySecondsAccumulated: 0,
+    stormActiveSecondsAccumulated: 0,
+
+    lifetimeAllSeasonsCoins: Math.max(
+      state.lifetimeAllSeasonsCoins || 0,
+      (state.lifetimeAllSeasonsCoins || 0) + (state.lifetimeCoins || 0)
+    ),
+    lifetimeAllSeasonsClicks: Math.max(
+      state.lifetimeAllSeasonsClicks || 0,
+      (state.lifetimeAllSeasonsClicks || 0) + (state.clicks || 0)
+    ),
+
     currentSeasonId: newSeasonId,
     seasonHistory: [
       ...(state.seasonHistory || []),

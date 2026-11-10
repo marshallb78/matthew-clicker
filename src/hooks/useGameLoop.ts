@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { GameState } from '../types/game';
 import { calculateCPS } from '../utils/calculations';
+import { formatNumber } from '../utils/formatters';
 import { checkAndApplyMilestoneUnlocks, equipSkin } from '../data/skins';
+import { checkAndAutoClaimQuests } from '../data/quests';
 import { saveGame, performSeasonalRollover } from '../utils/storage';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from '../components/ParticleCanvas';
@@ -128,9 +130,21 @@ export function useGameLoop({ state, setState, onNotify, liveContext }: UseGameL
           eventStats: nextEventStats,
         };
 
+        // Auto-claim completed quests immediately so quests cannot be hoarded across Rebirths
+        const { state: questState, newlyClaimed } = checkAndAutoClaimQuests(updatedBase);
+        if (newlyClaimed.length > 0) {
+          soundManager.playBuy();
+          newlyClaimed.forEach((q) => {
+            onNotifyRef.current(
+              '🎯 QUEST AUTO-CLAIMED!',
+              `${q.title}: +${q.rewardGems} Gems & +${formatNumber(q.rewardCoins)} MC!`
+            );
+          });
+        }
+
         // Check skin milestone unlocks immediately on every passive income tick!
         const { state: reconciledState, newlyUnlocked } = checkAndApplyMilestoneUnlocks(
-          updatedBase,
+          questState,
           cps
         );
         if (newlyUnlocked.length > 0) {
@@ -147,9 +161,9 @@ export function useGameLoop({ state, setState, onNotify, liveContext }: UseGameL
             );
           });
           let nextState: GameState = {
-            ...updatedBase,
+            ...questState,
             unlockedSkins: Array.from(
-              new Set([...updatedBase.unlockedSkins, ...reconciledState.unlockedSkins])
+              new Set([...questState.unlockedSkins, ...reconciledState.unlockedSkins])
             ),
           };
           nextState = equipSkin(nextState, reconciledState.equippedSkin);
@@ -157,7 +171,11 @@ export function useGameLoop({ state, setState, onNotify, liveContext }: UseGameL
           return nextState;
         }
 
-        return updatedBase;
+        if (newlyClaimed.length > 0) {
+          saveGame(questState);
+        }
+
+        return questState;
       });
     }, 50);
 
@@ -173,7 +191,7 @@ export function useGameLoop({ state, setState, onNotify, liveContext }: UseGameL
       if (current.currentSeasonId && current.currentSeasonId !== activeSeason.seasonId) {
         onNotifyRef.current(
           'NEW SEASON STARTED!',
-          `Season #${activeSeason.seasonNumber} is live! Your skins & gems carry over permanently.`
+          `Season #${activeSeason.seasonNumber} is live! Your skins, playtime, and lifetime clicks carry over permanently.`
         );
         setState((prev) => {
           const rolled = performSeasonalRollover(prev, activeSeason.seasonId);

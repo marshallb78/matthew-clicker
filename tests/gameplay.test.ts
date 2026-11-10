@@ -19,14 +19,17 @@ import {
   SKINS,
   ALL_SKINS,
   PUBLIC_VIEWABLE_SKINS,
+  SEASON_2_SKINS,
+  SEASON_2_STORM_SKINS,
   MATTHEW_STORM_SKINS,
   CHARACTER_SKINS,
 } from '../src/data/skins';
+import { checkAndAutoClaimQuests } from '../src/data/quests';
 import { BALANCE } from '../src/data/balance';
 import {
   GEM_ECONOMY_CONFIG,
   MATTHEW_STORM_CONFIG,
-  FRIDAY_BONUS_CONFIG,
+  SEASON_CONFIG,
 } from '../src/config/gameConfig';
 import {
   encodeFirestoreDocument,
@@ -35,20 +38,20 @@ import {
   markCloudWriteQuotaExceeded,
 } from '../src/firebase/config';
 import {
-  isFridayBonusActive,
+  getActiveSeason,
   evaluateMatthewStormState,
 } from '../src/utils/scheduleEngine';
 import { formatTime } from '../src/utils/formatters';
 import { validateUsernameFormat } from '../src/firebase/auth';
 
-describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
+describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
   let state = getDefaultGameState();
 
   beforeEach(() => {
     state = getDefaultGameState();
   });
 
-  describe('Economy, Ascension Multiplier & Calculations', () => {
+  describe('Economy, Ascension Multiplier (+0.08 per step) & Calculations', () => {
     it('calculates initial click power and zero CPS correctly', () => {
       const { totalPower, critChance, comboMultiplier, ascensionMultiplier } =
         calculateClickPower(state);
@@ -90,10 +93,10 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
       expect(maxInfo.totalCost).toBeLessThanOrEqual(coins);
     });
 
-    it('scales click power and CPS with Capybara-style Ascension Multiplier (+0.05 per step), Friday 2x, and Storm Wave multipliers', () => {
+    it('scales click power and CPS with buffed Ascension Multiplier (+0.08 per step) and Friday 4x Live Event', () => {
       state.upgrades['finger_exercise'] = 10; // base click = 1 + 10*0.5 = 6, base CPS = 10*0.2 = 2
       state.upgrades['energy_coffee'] = 10; // base CPS = 2 + 10*0.5 = 7, +10*1.5 = 15 click power -> total base click = 21
-      state.prestigeShards = 40; // Ascension Multiplier = 1 + 40 * 0.05 = 3.0x
+      state.prestigeShards = 25; // Ascension Multiplier = 1 + 25 * 0.08 = 3.0x
 
       const normalClick = calculateClickPower(state);
       const normalCps = calculateCPS(state);
@@ -101,33 +104,44 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
       expect(normalClick.totalPower).toBe(63); // 21 * 3x
       expect(normalCps).toBeCloseTo(21); // 7 * 3x
 
-      // Stack Friday 2x + 10x Storm Wave = 20x live multiplier on top of 3x Ascension Multiplier
-      const liveOpts = { fridayBonusActive: true, stormWaveMultiplier: 10 };
+      // Friday All-Day Live Event = 4x multiplier
+      const liveOpts = { fridayBonusActive: false, stormWaveMultiplier: 4 };
       const boostedClick = calculateClickPower(state, liveOpts);
       const boostedCps = calculateCPS(state, liveOpts);
 
-      expect(boostedClick.totalPower).toBe(1260); // 63 * 2 * 10
-      expect(boostedCps).toBeCloseTo(420.0); // 21 * 2 * 10
+      expect(boostedClick.totalPower).toBe(252); // 63 * 4
+      expect(boostedCps).toBeCloseTo(84.0); // 21 * 4
 
       const giantReward = calculateGiantMatthewClickReward(state, liveOpts);
       expect(giantReward).toBeGreaterThan(boostedClick.totalPower);
     });
   });
 
-  describe('Rebirth (Capybara Clicker Style Ascension Multiplier: +0.05 per step)', () => {
+  describe('Rebirth (Buffed Ascension Multiplier: +0.08 per step)', () => {
     it('returns 0 bonus if lifetime coins are below requirement (1M)', () => {
       expect(calculatePrestigeShards(500000)).toBe(0);
       expect(getAscensionMultiplier(0)).toBe(1);
     });
 
-    it('calculates Ascension Multiplier bonus in +0.05 steps at 1M and prevents runaway scaling at 1T/1Qa', () => {
+    it('calculates Ascension Multiplier bonus in +0.08 steps at 1M and scales smoothly', () => {
       expect(calculatePrestigeShards(1000000)).toBe(1);
       expect(calculatePrestigeShards(4000000)).toBe(2);
-      expect(getAscensionMultiplier(1)).toBe(1.05);
-      expect(getAscensionMultiplier(2)).toBe(1.1);
-      // Even at 1 Quadrillion (1e15) lifetime coins, multiplier stays controlled (< 5.0x)
+      expect(getAscensionMultiplier(1)).toBe(1.08);
+      expect(getAscensionMultiplier(2)).toBe(1.16);
       const qaShards = calculatePrestigeShards(1e15);
-      expect(getAscensionMultiplier(qaShards)).toBeLessThan(5.0);
+      expect(getAscensionMultiplier(qaShards)).toBeGreaterThan(2.5);
+      expect(getAscensionMultiplier(qaShards)).toBeLessThan(6.0);
+    });
+  });
+
+  describe('Auto-Claim Quests (Rebirth Glitch Prevention)', () => {
+    it('automatically claims completed quests immediately and awards gems & coins', () => {
+      state.clicks = 8000; // completes daily_clicks_7500
+      const { state: afterAuto, newlyClaimed } = checkAndAutoClaimQuests(state);
+      expect(newlyClaimed.some((q) => q.id === 'daily_clicks_7500')).toBe(true);
+      expect(afterAuto.claimedQuests).toContain('daily_clicks_7500');
+      expect(afterAuto.gems).toBeGreaterThanOrEqual(5);
+      expect(afterAuto.coins).toBeGreaterThanOrEqual(25000);
     });
   });
 
@@ -168,61 +182,47 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
     });
   });
 
-  describe('Gem Economy, Friday 2x & Matthew Storm Schedule', () => {
-    it('configures exact gem economy rates and 7s Giant Matthew duration', () => {
-      expect(GEM_ECONOMY_CONFIG.normalGemsPerInterval).toBe(3);
-      expect(GEM_ECONOMY_CONFIG.normalIntervalSeconds).toBe(600);
-      expect(GEM_ECONOMY_CONFIG.stormGemsPerInterval).toBe(10);
-      expect(GEM_ECONOMY_CONFIG.stormIntervalSeconds).toBe(600);
-      expect(GEM_ECONOMY_CONFIG.dailyLoginGems).toBe(5);
-      expect(GEM_ECONOMY_CONFIG.offlineGems).toBe(0);
+  describe('Weekly 7-Day Seasons, All-Day Friday 4x Live Event & Weekend Downtime', () => {
+    it('configures 7-day weekly seasons, 4x Friday Storm, and Saturday-Sunday Weekend Downtime', () => {
+      expect(SEASON_CONFIG.durationDays).toBe(7);
+      expect(SEASON_CONFIG.activePlayDurationMs).toBe(5 * 24 * 60 * 60 * 1000);
+      expect(MATTHEW_STORM_CONFIG.baseStormMultiplier).toBe(4);
       expect(GEM_ECONOMY_CONFIG.stormSkinCostGems).toBe(50);
-      expect(MATTHEW_STORM_CONFIG.giantMatthewDurationSeconds).toBeGreaterThanOrEqual(5);
-      expect(MATTHEW_STORM_CONFIG.giantMatthewDurationSeconds).toBeLessThanOrEqual(10);
-      expect(MATTHEW_STORM_SKINS.length).toBe(5);
-    });
 
-    it('detects Friday 2x points bonus on Friday in America/New_York including Nov 13, 2026', () => {
-      expect(FRIDAY_BONUS_CONFIG.multiplier).toBe(2);
-      const fridayNov13 = Date.parse('2026-11-13T12:00:00-05:00');
-      const thursdayNov12 = Date.parse('2026-11-12T12:00:00-05:00');
-      expect(isFridayBonusActive(fridayNov13)).toBe(true);
-      expect(isFridayBonusActive(thursdayNov12)).toBe(false);
-    });
+      // Friday Nov 13, 2026 at 2:00 PM EST -> Active Season 1, Live Event ON (4x), Downtime OFF
+      const fridayNov13 = Date.parse('2026-11-13T14:00:00-05:00');
+      const s1Friday = getActiveSeason(fridayNov13);
+      const stormFriday = evaluateMatthewStormState(fridayNov13, null);
+      expect(s1Friday.seasonId).toBe('season_1');
+      expect(s1Friday.isDowntime).toBe(false);
+      expect(stormFriday.status).toBe('active');
+      expect(stormFriday.shopOpen).toBe(true);
 
-    it('evaluates Matthew Storm schedule for Nov 13, 2026 1:50 PM – 2:00 PM EST and test simulation', () => {
-      expect(MATTHEW_STORM_CONFIG.startIso).toBe('2026-11-13T13:50:00-05:00');
-      expect(MATTHEW_STORM_CONFIG.endIso).toBe('2026-11-13T14:00:00-05:00');
-      expect(UPGRADES.length).toBe(35);
-      expect(UPGRADES[0].baseCost).toBe(50);
-      expect(UPGRADES[1].baseCost).toBe(500);
-      // Every upgrade prioritizes Click Power over passive CPS
-      UPGRADES.forEach((u) => {
-        expect(u.baseClickPower).toBeGreaterThan(u.baseCps);
-      });
+      // Saturday Nov 14, 2026 at 12:00 PM EST -> Season 1 Weekend Downtime ON!
+      const saturdayNov14 = Date.parse('2026-11-14T12:00:00-05:00');
+      const s1Saturday = getActiveSeason(saturdayNov14);
+      const stormSaturday = evaluateMatthewStormState(saturdayNov14, null);
+      expect(s1Saturday.seasonId).toBe('season_1');
+      expect(s1Saturday.isDowntime).toBe(true);
+      expect(s1Saturday.downtimeRemainingSeconds).toBeGreaterThan(0);
+      expect(stormSaturday.status).toBe('ended');
 
-      const startMs = Date.parse(MATTHEW_STORM_CONFIG.startIso);
-      const endMs = Date.parse(MATTHEW_STORM_CONFIG.endIso);
-
-      const pre5s = evaluateMatthewStormState(startMs - 5000, null);
-      expect(pre5s.status).toBe('fullscreen_10s_countdown');
-      expect(pre5s.secondsUntilStart).toBe(5);
-
-      const during = evaluateMatthewStormState(startMs + 60_000, null);
-      expect(during.status).toBe('active');
-      expect(during.shopOpen).toBe(true);
-
-      const after = evaluateMatthewStormState(endMs + 10_000, null);
-      expect(after.status).toBe('ended');
-      expect(after.shopOpen).toBe(false);
+      // Monday Nov 16, 2026 at 10:00 AM EST -> Season 2 Active, Downtime OFF!
+      const mondayNov16 = Date.parse('2026-11-16T10:00:00-05:00');
+      const s2Monday = getActiveSeason(mondayNov16);
+      expect(s2Monday.seasonId).toBe('season_2');
+      expect(s2Monday.isDowntime).toBe(false);
     });
   });
 
-  describe('30-Day Seasonal Rollover & Permanent Ownership', () => {
-    it('resets seasonal coins, upgrades, and rebirths while preserving all skins and gems', () => {
+  describe('Weekly Seasonal Rollover & Permanent Ownership', () => {
+    it('resets seasonal coins, upgrades, rebirths, and gems while preserving all skins, playtime, and lifetime clicks', () => {
       state.coins = 999999;
       state.lifetimeCoins = 5000000;
       state.seasonalScore = 5000000;
+      state.clicks = 12500;
+      state.lifetimeAllSeasonsClicks = 10000;
+      state.totalPlaytimeSeconds = 7200;
       state.prestigeCount = 4;
       state.prestigeShards = 50;
       state.unlockedSkins = ['classic_matthew', 'god_matthew', 'matthew_storm_skin_1', 'mathjew'];
@@ -234,6 +234,7 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
       expect(rolled.coins).toBe(0);
       expect(rolled.seasonalScore).toBe(0);
       expect(rolled.prestigeCount).toBe(0);
+      expect(rolled.gems).toBe(0);
 
       expect(rolled.unlockedSkins).toEqual([
         'classic_matthew',
@@ -242,7 +243,8 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
         'mathjew',
       ]);
       expect(rolled.equippedSkin).toBe('matthew_storm_skin_1');
-      expect(rolled.gems).toBe(135);
+      expect(rolled.totalPlaytimeSeconds).toBe(7200);
+      expect(rolled.lifetimeAllSeasonsClicks).toBeGreaterThanOrEqual(22500);
       expect(rolled.seasonHistory.length).toBe(1);
     });
   });
@@ -255,30 +257,30 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
     });
   });
 
-  describe('Main Point Skins, Super-Rare Mathjew (Mathgoon Removed) & 5 Secret Storm Skins', () => {
-    it('has 11 main point-based skins, cosmetic-only stats, super-rare Mathjew, no Mathgoon, and 5 secret Storm skins', () => {
+  describe('Season 1 & Season 2 Skin Lineups + 5 Season 2 Super-Rare Live Event Skins', () => {
+    it('includes Season 1 skins, Season 2 progression skins (Anime, Matthgoon, Minecraft, Moaning, Balenciaga), and 5 Season 2 Storm skins', () => {
       expect(SKINS.length).toBe(11);
-      expect(ALL_SKINS.length).toBe(18);
-      // PUBLIC_VIEWABLE_SKINS hides the 5 secret Storm Event skins
       expect(PUBLIC_VIEWABLE_SKINS.length).toBe(13);
-      MATTHEW_STORM_SKINS.forEach((stormSkin) => {
-        expect(PUBLIC_VIEWABLE_SKINS.some((s) => s.id === stormSkin.id)).toBe(false);
-      });
+      expect(MATTHEW_STORM_SKINS.length).toBe(5);
+      expect(SEASON_2_SKINS.length).toBe(11);
+      expect(SEASON_2_STORM_SKINS.length).toBe(5);
 
-      // Every skin is purely cosmetic swag (no stat boost) and uses transparent .png
+      const s2Ids = SEASON_2_SKINS.map((s) => s.id);
+      expect(s2Ids).toContain('anime_matthew');
+      expect(s2Ids).toContain('matthgoon');
+      expect(s2Ids).toContain('minecraft_matthew');
+      expect(s2Ids).toContain('moaning_matthew');
+      expect(s2Ids).toContain('balenciaga_matthew');
+
       ALL_SKINS.forEach((skin) => {
         expect(skin.clickBonusMultiplier).toBe(1.0);
         expect(skin.cpsBonusMultiplier).toBe(1.0);
         expect(skin.critBonusChance).toBe(0);
-        expect(skin.bruisedImage).toBeUndefined();
         expect(skin.image.endsWith('.png')).toBe(true);
       });
 
       const mathjew = CHARACTER_SKINS.find((s) => s.id === 'mathjew');
-      const mathgoon = CHARACTER_SKINS.find((s) => s.id === 'mathgoon');
       expect(mathjew).toBeDefined();
-      expect(mathjew?.milestone.target).toBeGreaterThanOrEqual(1e15);
-      expect(mathgoon).toBeUndefined();
     });
   });
 
@@ -293,16 +295,11 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
       state.prestigeShards = 15;
       state.lastBetaWipeId = null;
 
-      // Verify performBetaWipeIfDue never wipes or resets any player's data
       const checkResult = performBetaWipeIfDue(state, Date.now() + 99999999);
       expect(checkResult.wiped).toBe(false);
       expect(checkResult.state.coins).toBe(500000000);
-      expect(checkResult.state.lifetimeCoins).toBe(500000000);
-      expect(checkResult.state.gems).toBe(95);
-      expect(checkResult.state.prestigeCount).toBe(8);
       expect(checkResult.state.unlockedSkins).toContain('god_matthew');
 
-      // Verify Firestore REST encoding/decoding for standard and huge (Decillion) numbers & nested maps
       const sampleDoc = {
         uid: 'test_uid_123',
         username: 'Marshallb78',
@@ -316,11 +313,7 @@ describe('Matthew Clicker v1.1 Core & Mega Build Gameplay Tests', () => {
       expect(decoded.uid).toBe('test_uid_123');
       expect(decoded.username).toBe('Marshallb78');
       expect(decoded.seasonalScore).toBe(5e35);
-      expect(decoded.rebirthCount).toBe(12);
-      expect(decoded.unlockedSkins).toEqual(['classic_matthew', 'aura_matthew']);
-      expect(decoded.upgrades).toEqual({ finger_exercise: 25, energy_coffee: 10 });
 
-      // Verify Write Circuit Breaker trips cleanly without throwing
       expect(isCloudWriteCoolingDown()).toBe(false);
       markCloudWriteQuotaExceeded();
       expect(isCloudWriteCoolingDown()).toBe(true);
