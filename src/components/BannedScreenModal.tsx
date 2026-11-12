@@ -87,3 +87,4 @@ export const BannedScreenModal: React.FC<BannedScreenModalProps> = ({
     </div>
   );
 };
+

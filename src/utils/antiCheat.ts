@@ -1,85 +1,107 @@
+import { getCachedAntiCheatConfig } from '../firebase/moderation';
+
 /**
- * Real-Time Anti-Cheat & Auto-Clicker Detector:
- * 1. High-CPS Detection: Clicking > 17 CPS (18+ manual clicks within a 1-second window).
- * 2. Robotic / Perfect-Timing Detection: Sustained rapid clicking (24+ clicks at >= 6 CPS)
- *    with near-zero human timing jitter (standard deviation < 2.2ms).
+ * Real-time Clicks-Per-Second (CPS) tracker & Auto-Clicker / Macro Detector.
+ * - Live calculates the player's current CPS over a rolling 1,000ms window.
+ * - Flags cheating if:
+ *   1. Rolling 1-second click rate exceeds the configured maxCps (default > 17 CPS).
+ *   2. Robotic / perfect-timing intervals: across 25 consecutive fast clicks (< 170ms apart),
+ *      the standard deviation of inter-click intervals is < 2.2ms (machine-timed auto-clicker).
  */
 
-export interface AntiCheatCheckResult {
+export const MAX_LEGAL_CPS = 17;
+const ROBOTIC_SAMPLE_SIZE = 25;
+const ROBOTIC_MAX_AVG_INTERVAL_MS = 170; // ~5.9+ CPS sustained
+const ROBOTIC_STD_DEV_THRESHOLD_MS = 2.2; // < 2.2ms jitter over 25 clicks is impossible for a human
+
+export interface ClickCheckResult {
   liveCps: number;
   flagged: boolean;
   reason?: string;
 }
 
 export class AutoClickerDetector {
-  private clickTimestamps: number[] = [];
-  private highCpsStreakCount = 0;
+  private clickTimestampsMs: number[] = [];
+  private recentIntervalsMs: number[] = [];
+  private overLimitStrikes = 0;
 
-  public recordClick(nowMs: number = performance.now()): AntiCheatCheckResult {
-    // Prune clicks older than 3.5 seconds
-    this.clickTimestamps = this.clickTimestamps.filter((t) => nowMs - t <= 3500);
-    this.clickTimestamps.push(nowMs);
+  public recordClick(nowMs: number = performance.now()): ClickCheckResult {
+    const config = getCachedAntiCheatConfig();
+    const maxCps = config?.maxCps || MAX_LEGAL_CPS;
+    const checkRobotic = config?.detectRoboticTiming !== false;
 
-    // 1. Live CPS in the last 1000ms
-    const clicksLast1s = this.clickTimestamps.filter((t) => nowMs - t <= 1000).length;
+    // Track inter-click interval for robotic regularity analysis
+    if (this.clickTimestampsMs.length > 0) {
+      const prevTs = this.clickTimestampsMs[this.clickTimestampsMs.length - 1];
+      const delta = nowMs - prevTs;
+      // Ignore simultaneous (<8ms) hardware bounce and long pauses (>500ms)
+      if (delta >= 8 && delta <= 500) {
+        this.recentIntervalsMs.push(delta);
+        if (this.recentIntervalsMs.length > ROBOTIC_SAMPLE_SIZE) {
+          this.recentIntervalsMs.shift();
+        }
+      } else if (delta > 1200) {
+        this.recentIntervalsMs = [];
+      }
+    }
 
-    // Rule 1: Clicking above 17 CPS (>= 18 CPS)
-    if (clicksLast1s > 17) {
-      this.highCpsStreakCount += 1;
-      // Trigger immediately if >= 19 CPS, or if > 17 CPS is sustained for 3+ clicks
-      if (clicksLast1s >= 19 || this.highCpsStreakCount >= 3) {
+    // Prune clicks older than 1000ms
+    this.clickTimestampsMs.push(nowMs);
+    this.clickTimestampsMs = this.clickTimestampsMs.filter((ts) => nowMs - ts <= 1000);
+
+    const liveCps = this.clickTimestampsMs.length;
+
+    // Rule 1: Clicking above maxCps (> 17 CPS default)
+    if (liveCps > maxCps) {
+      this.overLimitStrikes += 1;
+      // Require 2 consecutive clicks above the threshold inside the 1s window to avoid single lag-frame spikes
+      if (this.overLimitStrikes >= 2 || liveCps >= maxCps + 2) {
         return {
-          liveCps: clicksLast1s,
+          liveCps,
           flagged: true,
-          reason: `You have been temporarily banned because of suspicious behavior including cheating or using an auto clicker (${clicksLast1s} CPS detected — max allowed is 17 CPS).`,
+          reason: `You have been temporarily banned because of suspicious behavior including cheating or using an auto clicker (${liveCps} CPS detected — max allowed is ${maxCps} CPS).`,
         };
       }
     } else {
-      this.highCpsStreakCount = Math.max(0, this.highCpsStreakCount - 1);
+      this.overLimitStrikes = 0;
     }
 
-    // Rule 2: Robotic / Perfect-Timing Detection over last 24 clicks
-    if (this.clickTimestamps.length >= 25) {
-      const recent = this.clickTimestamps.slice(-25);
-      const intervals: number[] = [];
-      for (let i = 1; i < recent.length; i++) {
-        intervals.push(recent[i] - recent[i - 1]);
-      }
+    // Rule 2: Robotic / perfect-timing auto-clicker detection
+    if (checkRobotic && this.recentIntervalsMs.length >= ROBOTIC_SAMPLE_SIZE) {
+      const sum = this.recentIntervalsMs.reduce((acc, v) => acc + v, 0);
+      const mean = sum / this.recentIntervalsMs.length;
 
-      const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-      // Only check robotic timing when clicking fast (average interval <= 165ms, i.e., >= 6 CPS)
-      if (avgInterval > 15 && avgInterval <= 165) {
+      if (mean <= ROBOTIC_MAX_AVG_INTERVAL_MS) {
         const variance =
-          intervals.reduce((acc, val) => acc + Math.pow(val - avgInterval, 2), 0) /
-          intervals.length;
+          this.recentIntervalsMs.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0) /
+          this.recentIntervalsMs.length;
         const stdDev = Math.sqrt(variance);
 
-        // Human rapid clicking always has > 4ms jitter; software timers/macros have < 2.2ms jitter
-        if (stdDev < 2.2) {
+        if (stdDev < ROBOTIC_STD_DEV_THRESHOLD_MS) {
           return {
-            liveCps: clicksLast1s,
+            liveCps,
             flagged: true,
             reason:
-              'You have been temporarily banned because of suspicious behavior including cheating, robotic perfect-timing clicks, or using an auto clicker.',
+              'You have been temporarily banned because of suspicious behavior including robotic perfect-timing clicks (auto clicker / macro detected).',
           };
         }
       }
     }
 
     return {
-      liveCps: clicksLast1s,
+      liveCps,
       flagged: false,
     };
   }
 
   public getCurrentCps(nowMs: number = performance.now()): number {
-    this.clickTimestamps = this.clickTimestamps.filter((t) => nowMs - t <= 1000);
-    return this.clickTimestamps.length;
+    this.clickTimestampsMs = this.clickTimestampsMs.filter((ts) => nowMs - ts <= 1000);
+    return this.clickTimestampsMs.length;
   }
 
   public reset(): void {
-    this.clickTimestamps = [];
-    this.highCpsStreakCount = 0;
+    this.clickTimestampsMs = [];
+    this.recentIntervalsMs = [];
+    this.overLimitStrikes = 0;
   }
 }
-

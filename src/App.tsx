@@ -20,7 +20,9 @@ import {
 } from './firebase/leaderboard';
 import {
   BanRecord,
+  ServerBroadcast,
   checkAccountBanStatus,
+  getCachedServerBroadcast,
   isDevAdminAccount,
   triggerAutoTempBan,
 } from './firebase/moderation';
@@ -62,7 +64,7 @@ export function App() {
 
   const [activeBanRecord, setActiveBanRecord] = useState<BanRecord | null>(null);
   const [top3Players, setTop3Players] = useState<LeaderboardEntry[]>([]);
-  const [goldenSpawnCounter, setGoldenSpawnCounter] = useState(0);
+  const [serverBroadcast, setServerBroadcast] = useState<ServerBroadcast | null>(null);
 
   // Schedule & Live Event state
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
@@ -129,12 +131,13 @@ export function App() {
     try {
       const entries = await fetchWorldwideLeaderboard(getActiveSeason().seasonId, 5);
       setTop3Players(entries.slice(0, 3));
+      setServerBroadcast(getCachedServerBroadcast());
     } catch {
       // ignore transient error
     }
   };
 
-  // Poll cloud bans & refresh Top 3 Mini Leaderboard every 5-12 seconds so banned players are locked even while playing
+  // Poll cloud bans & refresh Top 3 Mini Leaderboard every 6 seconds so banned players are locked even while playing
   useEffect(() => {
     const checkBanAndLeaderboard = async () => {
       const curr = stateRef.current;
@@ -146,8 +149,9 @@ export function App() {
       if (ban) {
         applyLocalBanReset(ban);
       } else {
-        setActiveBanRecord((prev) => (prev && prev.uid.startsWith('local_') ? prev : null));
+        setActiveBanRecord(null);
       }
+      setServerBroadcast(getCachedServerBroadcast());
       await refreshMiniLeaderboard();
     };
 
@@ -598,7 +602,6 @@ export function App() {
         state={state}
         setState={setState}
         onSpawnBonus={(text) => handleNotify('BONUS EVENT!', text)}
-        forceSpawnCounter={goldenSpawnCounter}
       />
 
       {/* TOP NOTIFICATION BANNERS (Auto-Claimed Quests, Unlocks, Events) */}
@@ -638,6 +641,7 @@ export function App() {
           onOpenDevTools={() => setShowDevToolsModal(true)}
           onAutoCheatDetected={handleAutoCheatDetected}
           top3Players={top3Players}
+          serverBroadcast={serverBroadcast}
           onNotify={handleNotify}
           fridayBonusActive={fridayBonus}
           stormState={stormState}
@@ -677,8 +681,6 @@ export function App() {
         isOpen={showDevToolsModal}
         onClose={() => setShowDevToolsModal(false)}
         state={state}
-        setState={setState}
-        onSpawnGoldenMatthew={() => setGoldenSpawnCounter((c) => c + 1)}
         onTriggerRain={() => {
           particleEngine.emitMatthewRain(
             45,

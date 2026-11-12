@@ -21,7 +21,7 @@ import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
 import { EnvironmentBackground } from './EnvironmentBackground';
 import { AutoClickerDetector } from '../utils/antiCheat';
-import { isDevAdminAccount } from '../firebase/moderation';
+import { ServerBroadcast, isDevAdminAccount } from '../firebase/moderation';
 import { LeaderboardEntry } from '../firebase/leaderboard';
 import {
   Volume2,
@@ -38,6 +38,7 @@ import {
   Wrench,
   Crown,
   Gauge,
+  Megaphone,
 } from 'lucide-react';
 
 interface ClickerAreaProps {
@@ -51,6 +52,7 @@ interface ClickerAreaProps {
   onOpenDevTools?: () => void;
   onAutoCheatDetected?: (reason: string, detectedCps: number) => void;
   top3Players?: LeaderboardEntry[];
+  serverBroadcast?: ServerBroadcast | null;
   onNotify?: (title: string, subtitle: string) => void;
   fridayBonusActive: boolean;
   stormState: MatthewStormState;
@@ -69,6 +71,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   onOpenDevTools,
   onAutoCheatDetected,
   top3Players = [],
+  serverBroadcast = null,
   fridayBonusActive,
   stormState,
   seasonLabel,
@@ -518,12 +521,93 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
                 </span>
               </div>
             )}
+
+            {serverBroadcast && serverBroadcast.active && (
+              <div
+                className={`flex items-center gap-2 px-3.5 py-1 rounded-full border-2 text-xs font-black shadow-lg animate-pulse ${
+                  serverBroadcast.theme === 'red'
+                    ? 'bg-red-950/95 border-red-400 text-red-100'
+                    : serverBroadcast.theme === 'cyan'
+                    ? 'bg-cyan-950/95 border-cyan-400 text-cyan-100'
+                    : serverBroadcast.theme === 'purple'
+                    ? 'bg-purple-950/95 border-fuchsia-400 text-fuchsia-100'
+                    : 'bg-amber-950/95 border-yellow-400 text-yellow-100'
+                }`}
+              >
+                <Megaphone className="w-3.5 h-3.5 shrink-0" />
+                <span>[ADMIN] {serverBroadcast.message}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* 3. BIG CHUNKY COIN COUNTER + LIVE CPS COUNTER TO THE RIGHT + CLICK-POWER HUD */}
-      <div className="flex flex-col items-center z-20 my-auto sm:my-1 w-full max-w-xl">
+      {/* 3. TOP HUD: [LEFT: TOP 3 MINI LEADERBOARD] — [CENTER: MATTHEW COINS] — [RIGHT: LIVE CPS] */}
+      <div className="relative flex flex-col items-center z-20 my-auto sm:my-1 w-full">
+        {/* TOP 3 MINI LEADERBOARD ON THE LEFT SIDE OF THE MONEY */}
+        {top3Players.length > 0 && (
+          <div
+            onClick={onOpenLeaderboard}
+            title="Click to open full Leaderboard & inspect player Playtime"
+            className="hidden sm:flex flex-col gap-1 absolute left-1 sm:left-2 top-0 z-30 w-44 md:w-52 p-2 rounded-2xl bg-slate-950/90 backdrop-blur-md border-2 border-yellow-400/50 hover:border-yellow-300 shadow-[0_0_25px_rgba(250,204,21,0.2)] cursor-pointer transition-transform hover:scale-[1.02]"
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 pb-1 mb-0.5">
+              <div className="flex items-center gap-1.5">
+                <Trophy className="w-3.5 h-3.5 text-yellow-400" />
+                <span className="text-[10px] font-black uppercase tracking-wider text-yellow-300">
+                  Top 3 Leaders
+                </span>
+              </div>
+              <span className="text-[9px] font-bold text-cyan-300">View →</span>
+            </div>
+
+            {top3Players.slice(0, 3).map((entry, idx) => {
+              const rank = idx + 1;
+              const skin = getSkinById(entry.equippedSkin);
+              const isMe = state.cloudAccount?.uid === entry.uid;
+
+              return (
+                <div
+                  key={entry.uid}
+                  className={`flex items-center justify-between gap-1.5 px-2 py-1 rounded-xl border ${
+                    rank === 1
+                      ? 'bg-yellow-500/15 border-yellow-400/60'
+                      : isMe
+                      ? 'bg-cyan-500/15 border-cyan-400/60'
+                      : 'bg-slate-900/90 border-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span
+                      className={`w-4 h-4 rounded-md text-[9px] font-black flex items-center justify-center shrink-0 ${
+                        rank === 1
+                          ? 'bg-yellow-400 text-slate-950'
+                          : rank === 2
+                          ? 'bg-slate-300 text-slate-950'
+                          : 'bg-amber-600 text-white'
+                      }`}
+                    >
+                      #{rank}
+                    </span>
+                    <img
+                      src={skin.image}
+                      alt={skin.name}
+                      className="w-5 h-5 rounded bg-slate-950 object-contain shrink-0"
+                    />
+                    <span className="text-[11px] font-black text-white truncate">
+                      {entry.username}
+                    </span>
+                    {rank === 1 && <Crown className="w-3 h-3 text-yellow-300 shrink-0" />}
+                  </div>
+                  <span className="text-[10px] font-black text-amber-300 shrink-0">
+                    {formatCoins(entry.seasonalScore)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         <div className="flex items-center justify-center gap-3 flex-wrap">
           {/* MATTHEW COINS COUNTER */}
           <div className="flex items-center gap-2.5 drop-shadow-[0_6px_18px_rgba(251,191,36,0.35)]">
@@ -627,71 +711,8 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
         </div>
       </div>
 
-      {/* 4. CENTRAL HERO MATTHEW CHARACTER + LEFT-SIDE TOP 3 MINI LEADERBOARD + GIANT STORM MATTHEW */}
+      {/* 4. CENTRAL HERO MATTHEW CHARACTER + GIANT STORM MATTHEW */}
       <div className="relative flex-1 flex items-center justify-center w-full z-10 py-2">
-        {/* LEFT-SIDE MINI LEADERBOARD SHOWING TOP 3 PLAYERS */}
-        {top3Players.length > 0 && (
-          <div
-            onClick={onOpenLeaderboard}
-            title="Click to open full Leaderboard & inspect player Playtime"
-            className="hidden sm:flex flex-col gap-1.5 absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 z-30 w-44 md:w-52 p-2.5 rounded-2xl bg-slate-950/90 backdrop-blur-md border-2 border-yellow-400/50 hover:border-yellow-300 shadow-[0_0_25px_rgba(250,204,21,0.2)] cursor-pointer transition-transform hover:scale-[1.02]"
-          >
-            <div className="flex items-center justify-between border-b border-slate-800 pb-1.5 mb-0.5">
-              <div className="flex items-center gap-1.5">
-                <Trophy className="w-3.5 h-3.5 text-yellow-400" />
-                <span className="text-[10px] font-black uppercase tracking-wider text-yellow-300">
-                  Top 3 Leaders
-                </span>
-              </div>
-              <span className="text-[9px] font-bold text-cyan-300">View All →</span>
-            </div>
-
-            {top3Players.slice(0, 3).map((entry, idx) => {
-              const rank = idx + 1;
-              const skin = getSkinById(entry.equippedSkin);
-              const isMe = state.cloudAccount?.uid === entry.uid;
-
-              return (
-                <div
-                  key={entry.uid}
-                  className={`flex items-center justify-between gap-2 p-1.5 rounded-xl border ${
-                    rank === 1
-                      ? 'bg-yellow-500/15 border-yellow-400/60'
-                      : isMe
-                      ? 'bg-cyan-500/15 border-cyan-400/60'
-                      : 'bg-slate-900/90 border-slate-800'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span
-                      className={`w-5 h-5 rounded-lg text-[10px] font-black flex items-center justify-center shrink-0 ${
-                        rank === 1
-                          ? 'bg-yellow-400 text-slate-950'
-                          : rank === 2
-                          ? 'bg-slate-300 text-slate-950'
-                          : 'bg-amber-600 text-white'
-                      }`}
-                    >
-                      #{rank}
-                    </span>
-                    <img
-                      src={skin.image}
-                      alt={skin.name}
-                      className="w-6 h-6 rounded-md bg-slate-950 object-contain shrink-0"
-                    />
-                    <span className="text-[11px] font-black text-white truncate">
-                      {entry.username}
-                    </span>
-                    {rank === 1 && <Crown className="w-3 h-3 text-yellow-300 shrink-0" />}
-                  </div>
-                  <span className="text-[10px] font-black text-amber-300 shrink-0">
-                    {formatCoins(entry.seasonalScore)}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
 
         <style>{`
           @keyframes clickerBreathPulse {
