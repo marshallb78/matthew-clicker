@@ -5,6 +5,7 @@ import { soundManager } from '../audio/soundManager';
 interface IntroCutsceneModalProps {
   isOpen: boolean;
   onComplete: () => void;
+  isCloudLoading?: boolean;
 }
 
 const FLOATING_BADGES = [
@@ -15,7 +16,11 @@ const FLOATING_BADGES = [
   { left: '48%', top: '10%', size: 42, delay: '1.7s', duration: '5.2s', rot: '8deg' },
 ];
 
-export const IntroCutsceneModal: React.FC<IntroCutsceneModalProps> = ({ isOpen, onComplete }) => {
+export const IntroCutsceneModal: React.FC<IntroCutsceneModalProps> = ({
+  isOpen,
+  onComplete,
+  isCloudLoading = false,
+}) => {
   const [progress, setProgress] = useState(0);
   const [isReadyToPlay, setIsReadyToPlay] = useState(false);
 
@@ -52,12 +57,14 @@ export const IntroCutsceneModal: React.FC<IntroCutsceneModalProps> = ({ isOpen, 
       ? 'Connecting to Matthew Realtime Cloud & Worldwide Leaderboards...'
       : progress < 65
       ? 'Loading Weekly Season Schedule, 4× Friday Storm & Collectible Skins...'
-      : progress < 100
+      : !isReadyToPlay
       ? 'Synchronizing Ascension Multipliers & Offline Earnings...'
+      : isCloudLoading
+      ? 'Retrieving your most recent cloud save before starting...'
       : 'All Systems Ready! Click PLAY to enter Matthew Clicker!';
 
   const handleStartGame = () => {
-    if (!isReadyToPlay) return;
+    if (!isReadyToPlay || isCloudLoading) return;
     soundManager.playSkinUnlock();
     onComplete();
   };
@@ -199,11 +206,25 @@ export const IntroCutsceneModal: React.FC<IntroCutsceneModalProps> = ({ isOpen, 
           <div className="w-full max-w-sm flex flex-col items-center animate-fade-in">
             <button
               onClick={handleStartGame}
-              style={{ animation: 'introPlayPulse 1.6s ease-in-out infinite' }}
-              className="w-full py-4 px-8 rounded-2xl bg-gradient-to-r from-yellow-300 via-amber-400 to-cyan-300 hover:brightness-110 active:scale-95 text-slate-950 font-black text-xl sm:text-2xl uppercase tracking-wider border-2 border-white flex items-center justify-center gap-3 cursor-pointer transition btn-chunky"
+              disabled={isCloudLoading}
+              style={{ animation: isCloudLoading ? undefined : 'introPlayPulse 1.6s ease-in-out infinite' }}
+              className={`w-full py-4 px-8 rounded-2xl font-black text-xl sm:text-2xl uppercase tracking-wider border-2 border-white flex items-center justify-center gap-3 transition btn-chunky ${
+                isCloudLoading
+                  ? 'bg-slate-800 text-cyan-300 cursor-wait opacity-90'
+                  : 'bg-gradient-to-r from-yellow-300 via-amber-400 to-cyan-300 hover:brightness-110 active:scale-95 text-slate-950 cursor-pointer'
+              }`}
             >
-              <Play className="w-7 h-7 fill-slate-950 text-slate-950" />
-              <span>CLICK TO PLAY</span>
+              {isCloudLoading ? (
+                <>
+                  <div className="w-6 h-6 border-3 border-cyan-300 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-base sm:text-lg">SYNCING LATEST SAVE...</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-7 h-7 fill-slate-950 text-slate-950" />
+                  <span>CLICK TO PLAY</span>
+                </>
+              )}
             </button>
             <span className="mt-2.5 text-[11px] font-bold text-slate-400">
               Tip: Press <strong className="text-cyan-300">SPACEBAR</strong> to click &amp;{' '}

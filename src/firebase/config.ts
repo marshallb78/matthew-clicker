@@ -1,6 +1,8 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { getAuth, Auth } from 'firebase/auth';
+import { getAuth, Auth, onIdTokenChanged } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
+
+export const TAB_SESSION_ID = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
 const env = (typeof import.meta !== 'undefined' && (import.meta as any).env) || {};
 
@@ -20,6 +22,8 @@ let appInstance: FirebaseApp | null = null;
 let authInstance: Auth | null = null;
 let dbInstance: Firestore | null = null;
 let initError: string | null = null;
+let cachedAuthIdToken: string | null = null;
+let idTokenListenerAttached = false;
 
 let writeCooldownUntilMs = 0;
 const WRITE_COOLDOWN_DURATION_MS = 5 * 60 * 1000;
@@ -49,6 +53,20 @@ export function getFirebaseServices(): {
     if (!authInstance) {
       authInstance = getAuth(appInstance);
     }
+    if (!idTokenListenerAttached && authInstance) {
+      idTokenListenerAttached = true;
+      onIdTokenChanged(authInstance, async (user) => {
+        if (!user) {
+          cachedAuthIdToken = null;
+          return;
+        }
+        try {
+          cachedAuthIdToken = await user.getIdToken();
+        } catch {
+          // keep previous token if transient
+        }
+      });
+    }
     if (!dbInstance) {
       dbInstance = getFirestore(appInstance);
     }
@@ -66,15 +84,70 @@ const FIRESTORE_REST_BASE = `https://firestore.googleapis.com/v1/projects/${fire
 export async function getAuthIdToken(timeoutMs = 2500): Promise<string | null> {
   if (typeof window === 'undefined') return null;
   const { auth } = getFirebaseServices();
-  if (!auth?.currentUser) return null;
-  try {
-    return await Promise.race([
-      auth.currentUser.getIdToken(),
-      new Promise<string | null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
-    ]);
-  } catch {
+  if (!auth?.currentUser) {
+    cachedAuthIdToken = null;
     return null;
   }
+  try {
+    const token = await Promise.race([
+      auth.currentUser.getIdToken(),
+      new Promise<string | null>((resolve) => setTimeout(() => resolve(cachedAuthIdToken), timeoutMs)),
+    ]);
+    if (token) cachedAuthIdToken = token;
+    return token;
+  } catch {
+    return cachedAuthIdToken;
+  }
+}
+
+export function getCachedAuthIdTokenSync(): string | null {
+  return cachedAuthIdToken;
+}
+
+/**
+ * Stateless Firebase Realtime Database GET via HTTP REST with status reporting & automatic retry.
+ * Explicitly distinguishes HTTP 200 (ok: true, even when data === null) from network/timeout failures (ok: false).
+ */
+export async function rtdbRestGetWithStatus<T = any>(
+  path: string,
+  timeoutMs = 6500,
+  retries = 1
+): Promise<{ ok: boolean; data: T | null }> {
+  const cleanPath = path.replace(/^\/+|\.json$/g, '');
+  const token = await getAuthIdToken(1800);
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const url = token
+        ? `${RTDB_REST_BASE}/${cleanPath}.json?auth=${encodeURIComponent(token)}`
+        : `${RTDB_REST_BASE}/${cleanPath}.json`;
+      let res = await fetch(url, {
+        method: 'GET',
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      if (!res.ok && token && (res.status === 401 || res.status === 403)) {
+        res = await fetch(`${RTDB_REST_BASE}/${cleanPath}.json`, {
+          method: 'GET',
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+      }
+      if (res.ok) {
+        return { ok: true, data: (await res.json()) as T | null };
+      }
+    } catch {
+      // retry if attempts remain
+    } finally {
+      clearTimeout(timer);
+    }
+    if (attempt < retries) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+  return { ok: false, data: null };
 }
 
 /**
@@ -84,23 +157,10 @@ export async function getAuthIdToken(timeoutMs = 2500): Promise<string | null> {
  */
 export async function rtdbRestGet<T = any>(
   path: string,
-  timeoutMs = 3500
+  timeoutMs = 5500
 ): Promise<T | null> {
-  const cleanPath = path.replace(/^\/+|\.json$/g, '');
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${RTDB_REST_BASE}/${cleanPath}.json`, {
-      method: 'GET',
-      signal: controller.signal,
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as T | null;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await rtdbRestGetWithStatus<T>(path, timeoutMs, 1);
+  return res.data;
 }
 
 /**
@@ -111,7 +171,8 @@ export async function rtdbRestWrite(
   path: string,
   data: Record<string, any>,
   method: 'PUT' | 'PATCH' = 'PUT',
-  timeoutMs = 3500
+  timeoutMs = 4500,
+  keepalive = false
 ): Promise<boolean> {
   const cleanPath = path.replace(/^\/+|\.json$/g, '');
   const token = await getAuthIdToken();
@@ -126,6 +187,7 @@ export async function rtdbRestWrite(
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
+      keepalive,
       signal: controller.signal,
     });
     if (res.ok) return true;
@@ -134,6 +196,7 @@ export async function rtdbRestWrite(
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
+        keepalive,
         signal: controller.signal,
       });
       return fallbackRes.ok;
@@ -143,6 +206,33 @@ export async function rtdbRestWrite(
     return false;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/**
+ * Synchronous keepalive write for beforeunload / pagehide / visibilitychange so closing
+ * a phone or desktop browser flushes the latest save before the tab terminates.
+ */
+export function rtdbRestWriteKeepalive(
+  path: string,
+  data: Record<string, any>,
+  method: 'PUT' | 'PATCH' = 'PUT'
+): void {
+  if (typeof fetch === 'undefined') return;
+  const cleanPath = path.replace(/^\/+|\.json$/g, '');
+  const token = cachedAuthIdToken;
+  const url = token
+    ? `${RTDB_REST_BASE}/${cleanPath}.json?auth=${encodeURIComponent(token)}`
+    : `${RTDB_REST_BASE}/${cleanPath}.json`;
+  try {
+    fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // ignore unload errors
   }
 }
 

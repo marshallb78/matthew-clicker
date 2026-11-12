@@ -225,6 +225,7 @@ export interface GameState {
   introCutsceneSeen: boolean;
   discoveredEasterEggs: string[];
   lastBetaWipeId?: string | null;
+  lastOwnerUid?: string | null;
   cloudAccount?: {
     uid: string;
     username: string;

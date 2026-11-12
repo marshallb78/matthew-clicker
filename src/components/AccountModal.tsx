@@ -6,7 +6,12 @@ import {
   logoutPlayer,
   validateUsernameFormat,
 } from '../firebase/auth';
-import { loadAndReconcileCloudSave, saveStateToCloud } from '../firebase/cloudSave';
+import {
+  clearCloudSaveSignature,
+  saveStateToCloud,
+  signInAndReconcileAccount,
+  syncAccountBidirectional,
+} from '../firebase/cloudSave';
 import { getFirebaseServices, isCloudWriteCoolingDown } from '../firebase/config';
 import { saveGame } from '../utils/storage';
 import {
@@ -66,21 +71,8 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     setLoading(true);
     try {
       const { account: profile, isNewAccount } = await authenticateUnified(username, password);
-
-      const merged = await loadAndReconcileCloudSave(profile.uid, profile.username, state);
-      const nextState: GameState = {
-        ...merged,
-        cloudAccount: {
-          uid: profile.uid,
-          username: profile.username,
-          displayUsername: profile.username,
-          lastCloudSync: Date.now(),
-        },
-      };
-
+      const nextState = await signInAndReconcileAccount(profile.uid, profile.username, state);
       setState(nextState);
-      saveGame(nextState);
-      saveStateToCloud(profile.uid, profile.username, nextState, true).catch(() => {});
 
       onNotify(
         isNewAccount ? 'ACCOUNT CREATED!' : 'WELCOME BACK!',
@@ -142,19 +134,12 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     setError(null);
     setSyncMessage(null);
     try {
-      saveGame(state);
-      const ok = await saveStateToCloud(
+      const { nextState, ok } = await syncAccountBidirectional(
         state.cloudAccount.uid,
         state.cloudAccount.displayUsername,
-        state,
-        true
+        state
       );
-      const now = Date.now();
-      setState((prev) =>
-        prev.cloudAccount
-          ? { ...prev, cloudAccount: { ...prev.cloudAccount, lastCloudSync: now } }
-          : prev
-      );
+      setState(nextState);
       if (ok) {
         setSyncMessage('Synced!');
       } else if (isCloudWriteCoolingDown()) {
@@ -173,11 +158,11 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     setLoading(true);
     try {
       if (state.cloudAccount) {
-        saveStateToCloud(
-          state.cloudAccount.uid,
-          state.cloudAccount.displayUsername,
-          state
-        ).catch(() => {});
+        const uid = state.cloudAccount.uid;
+        await saveStateToCloud(uid, state.cloudAccount.displayUsername, state, true).catch(
+          () => {}
+        );
+        clearCloudSaveSignature(uid);
       }
       await logoutPlayer();
       setState((prev) => {

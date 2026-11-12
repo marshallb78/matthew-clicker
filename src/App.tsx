@@ -11,12 +11,20 @@ import {
   evaluateMatthewStormState,
 } from './utils/scheduleEngine';
 import { MATTHEW_STORM_CONFIG } from './config/gameConfig';
+import { getFirebaseServices } from './firebase/config';
 import { logoutPlayer, subscribeToAuthChanges } from './firebase/auth';
-import { loadAndReconcileCloudSave, saveStateToCloud } from './firebase/cloudSave';
+import {
+  clearCloudSaveSignature,
+  hasCompletedInitialCloudPull,
+  hasForeignDeviceSavedMoreRecently,
+  loadAndReconcileCloudSave,
+  registerForeignCloudUpdateHandler,
+  saveStateToCloud,
+  saveStateToCloudKeepalive,
+} from './firebase/cloudSave';
 import {
   LeaderboardEntry,
   fetchWorldwideLeaderboard,
-  updateLeaderboardEntry,
 } from './firebase/leaderboard';
 import {
   BanRecord,
@@ -76,9 +84,13 @@ export function App() {
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  // Prevents background auto-save from overwriting cloud progress before initial login reconciliation completes
+  // Blocks local state ticks, offline calculations, and cloud writes on initial load until
+  // Firebase Auth & latest Cloud Save retrieval finish!
+  const [isInitialCloudHydrating, setIsInitialCloudHydrating] = useState<boolean>(true);
+  const isHydratingCloudRef = useRef<boolean>(true);
   const isReconcilingCloudRef = useRef<boolean>(false);
   const offlineCheckedForUidRef = useRef<string | null>(null);
+  const lastForegroundCheckAtRef = useRef<number>(0);
 
   const prevStormStatusRef = useRef<string>('pre_countdown');
   const prevWaveIndexRef = useRef<number>(-1);
@@ -236,9 +248,10 @@ export function App() {
     soundManager.setMusicTrack(isStormMusic ? 'storm' : 'chill');
   }, [stormState.status]);
 
-  // Mandatory Sign-In: Only show the Sign In popup automatically if the player is NOT signed in!
+  // Mandatory Sign-In: Only show the Sign In popup after cloud hydration completes if not signed in
   useEffect(() => {
     if (
+      !isInitialCloudHydrating &&
       !showIntroCutscene &&
       !activeBanRecord &&
       !state.cloudAccount &&
@@ -247,7 +260,14 @@ export function App() {
     ) {
       setShowAccountModal(true);
     }
-  }, [showIntroCutscene, activeBanRecord, state.cloudAccount, showAccountModal, showEscMenu]);
+  }, [
+    isInitialCloudHydrating,
+    showIntroCutscene,
+    activeBanRecord,
+    state.cloudAccount,
+    showAccountModal,
+    showEscMenu,
+  ]);
 
   // Detect Matthew Storm wave transitions and event completion
   useEffect(() => {
@@ -288,40 +308,33 @@ export function App() {
     prevWaveIndexRef.current = currWaveIdx;
   }, [stormState.status, stormState.currentWave]);
 
-  // Check uncapped offline earnings on initial local mount
+  // Step 0: On page load (BEFORE gameplay ticks, offline calculations, or cloud saves run),
+  // wait for Firebase Auth & retrieve the most recent cloud save for this player.
   useEffect(() => {
-    const nowSec = Math.floor(Date.now() / 1000);
-    const { elapsedSeconds, coinsEarned } = calculateOfflineEarnings(
-      state,
-      nowSec,
-      seasonInfo.seasonId
-    );
-    if (elapsedSeconds > 15 && coinsEarned > 0) {
-      setOfflineData({ elapsed: elapsedSeconds, coins: coinsEarned });
-    }
-  }, []);
+    let cancelled = false;
 
-  // Subscribe to Firebase Auth changes for persistent session restoration + Cloud Offline Earnings
-  useEffect(() => {
-    const unsubscribe = subscribeToAuthChanges(async (profile) => {
-      if (!profile) return;
+    const finishHydration = () => {
+      if (cancelled) return;
+      isHydratingCloudRef.current = false;
+      setIsInitialCloudHydrating(false);
+    };
+
+    const hydrateProfileFromCloud = async (uid: string, username: string, notifySync = false) => {
+      if (cancelled) return;
       isReconcilingCloudRef.current = true;
       try {
-        const ban = await checkAccountBanStatus(profile.uid, profile.username, true);
+        const ban = await checkAccountBanStatus(uid, username, true);
         if (ban) {
           applyLocalBanReset(ban);
           return;
         }
 
-        const merged = await loadAndReconcileCloudSave(
-          profile.uid,
-          profile.username,
-          stateRef.current
-        );
+        const merged = await loadAndReconcileCloudSave(uid, username, stateRef.current);
+        if (cancelled) return;
 
-        // Award offline earnings ONLY if the reconciled cloud account actually has passive upgrades and coins > 0
-        if (offlineCheckedForUidRef.current !== profile.uid) {
-          offlineCheckedForUidRef.current = profile.uid;
+        // Calculate offline earnings once using the retrieved cloud save (never stale localStorage)
+        if (offlineCheckedForUidRef.current !== uid) {
+          offlineCheckedForUidRef.current = uid;
           const nowSec = Math.floor(Date.now() / 1000);
           const { elapsedSeconds, coinsEarned } = calculateOfflineEarnings(
             merged,
@@ -337,51 +350,151 @@ export function App() {
 
         setState((prev) => {
           const { state: checkedPrev } = performBetaWipeIfDue(prev, Date.now());
+          const sameOwner = !checkedPrev.lastOwnerUid || checkedPrev.lastOwnerUid === uid;
           const next: GameState = {
             ...merged,
-            unlockedSkins: Array.from(
-              new Set([...checkedPrev.unlockedSkins, ...merged.unlockedSkins])
-            ),
+            unlockedSkins: sameOwner
+              ? Array.from(new Set([...checkedPrev.unlockedSkins, ...merged.unlockedSkins]))
+              : merged.unlockedSkins,
+            lastOwnerUid: uid,
             lastSaveTime: Date.now(),
             cloudAccount: {
-              uid: profile.uid,
-              username: profile.username,
-              displayUsername: profile.username,
+              uid,
+              username,
+              displayUsername: username,
               lastCloudSync: Date.now(),
             },
           };
-          saveGame(next);
+          saveGame(next, true);
           return next;
         });
+
+        if (notifySync) {
+          handleNotify('CLOUD SAVE SYNCED!', 'Loaded newer progress from your other device!');
+        }
         refreshMiniLeaderboard();
       } finally {
         isReconcilingCloudRef.current = false;
+        finishHydration();
       }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Fast 10-second Realtime Database Leaderboard + Progress sync while actively playing
-  useEffect(() => {
-    const fastLeaderboardSync = () => {
-      if (isReconcilingCloudRef.current || activeBanRecord) return;
-      const curr = stateRef.current;
-      if (!curr.cloudAccount) return;
-      const isRecentlyActive = Date.now() - (curr.lastActiveInputTimestamp || 0) < 20000;
-      if (!isRecentlyActive) return;
-      updateLeaderboardEntry(
-        curr.cloudAccount.uid,
-        curr.cloudAccount.displayUsername,
-        curr
-      ).catch(() => {});
     };
 
-    const deepProfileBackup = () => {
-      if (isReconcilingCloudRef.current || activeBanRecord) return;
+    const unsubscribe = subscribeToAuthChanges(async (profile) => {
+      if (!profile) return;
+      await hydrateProfileFromCloud(profile.uid, profile.username, false);
+    });
+
+    // Ensure initial hydration always resolves even if the player is a guest / signed out
+    const waitForInitialAuth = async () => {
+      try {
+        const { auth } = getFirebaseServices();
+        if (auth && typeof auth.authStateReady === 'function') {
+          await Promise.race([
+            auth.authStateReady(),
+            new Promise((resolve) => setTimeout(resolve, 5000)),
+          ]);
+        }
+
+        if (cancelled) return;
+
+        const { auth: resolvedAuth } = getFirebaseServices();
+        const currentUser = resolvedAuth?.currentUser;
+
+        if (currentUser) {
+          const fallbackName =
+            currentUser.displayName ||
+            (currentUser.email ? currentUser.email.split('@')[0] : 'player');
+          const uid = currentUser.uid;
+          if (!hasCompletedInitialCloudPull(uid) && !isReconcilingCloudRef.current) {
+            await hydrateProfileFromCloud(uid, fallbackName, false);
+          } else {
+            finishHydration();
+          }
+          return;
+        }
+
+        // Not signed into Firebase Auth: check if local guest offline earnings apply
+        const curr = stateRef.current;
+        if (!curr.cloudAccount) {
+          const nowSec = Math.floor(Date.now() / 1000);
+          const { elapsedSeconds, coinsEarned } = calculateOfflineEarnings(
+            curr,
+            nowSec,
+            getActiveSeason().seasonId
+          );
+          if (elapsedSeconds > 15 && coinsEarned > 0 && curr.coins > 0) {
+            setOfflineData({ elapsed: elapsedSeconds, coins: coinsEarned });
+          }
+        }
+        finishHydration();
+      } catch {
+        finishHydration();
+      }
+    };
+
+    waitForInitialAuth();
+
+    // Register foreign-device conflict handler + tab wake-up sync so switching back to an open tab
+    // pulls newer cloud data instead of overwriting it!
+    const pullIfAnotherDeviceUpdated = async (forceCheck = false) => {
+      const curr = stateRef.current;
+      if (
+        cancelled ||
+        !curr.cloudAccount?.uid ||
+        isHydratingCloudRef.current ||
+        isReconcilingCloudRef.current
+      ) {
+        return;
+      }
+      const now = Date.now();
+      if (!forceCheck && now - lastForegroundCheckAtRef.current < 8000) return;
+      lastForegroundCheckAtRef.current = now;
+
+      const foreignNewer = await hasForeignDeviceSavedMoreRecently(curr.cloudAccount.uid);
+      if (foreignNewer) {
+        await hydrateProfileFromCloud(
+          curr.cloudAccount.uid,
+          curr.cloudAccount.displayUsername,
+          true
+        );
+      }
+    };
+
+    registerForeignCloudUpdateHandler((uid) => {
+      if (stateRef.current.cloudAccount?.uid === uid) {
+        pullIfAnotherDeviceUpdated(true).catch(() => {});
+      }
+    });
+
+    const onWindowFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        pullIfAnotherDeviceUpdated(false).catch(() => {});
+      }
+    };
+    window.addEventListener('focus', onWindowFocusOrVisible);
+    document.addEventListener('visibilitychange', onWindowFocusOrVisible);
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      registerForeignCloudUpdateHandler(null);
+      window.removeEventListener('focus', onWindowFocusOrVisible);
+      document.removeEventListener('visibilitychange', onWindowFocusOrVisible);
+    };
+  }, []);
+
+  // Fast 10-second Realtime Database Profile + Leaderboard sync while playing, plus keepalive flush on close/background
+  useEffect(() => {
+    const syncProfileAndLeaderboard = () => {
+      if (
+        isHydratingCloudRef.current ||
+        isReconcilingCloudRef.current ||
+        activeBanRecord
+      ) {
+        return;
+      }
       const curr = stateRef.current;
       if (!curr.cloudAccount) return;
-      const isRecentlyActive = Date.now() - (curr.lastActiveInputTimestamp || 0) < 45000;
-      if (!isRecentlyActive) return;
       saveStateToCloud(
         curr.cloudAccount.uid,
         curr.cloudAccount.displayUsername,
@@ -389,26 +502,41 @@ export function App() {
       ).catch(() => {});
     };
 
-    const fastInterval = setInterval(fastLeaderboardSync, 10000);
-    const deepInterval = setInterval(deepProfileBackup, 30000);
+    const syncInterval = setInterval(syncProfileAndLeaderboard, 10000);
 
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'hidden' && !isReconcilingCloudRef.current) {
-        const curr = stateRef.current;
-        if (curr.cloudAccount) {
-          saveStateToCloud(
-            curr.cloudAccount.uid,
-            curr.cloudAccount.displayUsername,
-            curr
-          ).catch(() => {});
-        }
+    const flushOnHideOrUnload = () => {
+      if (
+        isHydratingCloudRef.current ||
+        isReconcilingCloudRef.current ||
+        activeBanRecord
+      ) {
+        return;
+      }
+      const curr = stateRef.current;
+      saveGame(curr);
+      if (curr.cloudAccount) {
+        saveStateToCloudKeepalive(
+          curr.cloudAccount.uid,
+          curr.cloudAccount.displayUsername,
+          curr
+        );
       }
     };
-    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    const onVisibilityHide = () => {
+      if (document.visibilityState === 'hidden') {
+        flushOnHideOrUnload();
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityHide);
+    window.addEventListener('pagehide', flushOnHideOrUnload);
+    window.addEventListener('beforeunload', flushOnHideOrUnload);
     return () => {
-      clearInterval(fastInterval);
-      clearInterval(deepInterval);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
+      clearInterval(syncInterval);
+      document.removeEventListener('visibilitychange', onVisibilityHide);
+      window.removeEventListener('pagehide', flushOnHideOrUnload);
+      window.removeEventListener('beforeunload', flushOnHideOrUnload);
     };
   }, [activeBanRecord]);
 
@@ -454,6 +582,14 @@ export function App() {
           lastActiveInputTimestamp: Date.now(),
         };
         saveGame(next);
+        if (next.cloudAccount) {
+          saveStateToCloud(
+            next.cloudAccount.uid,
+            next.cloudAccount.displayUsername,
+            next,
+            true
+          ).catch(() => {});
+        }
         return next;
       });
       setOfflineData(null);
@@ -469,6 +605,7 @@ export function App() {
       stormWaveMultiplier,
       isStormActive,
     },
+    enabled: !isInitialCloudHydrating && !activeBanRecord,
   });
 
   const handleEarnCoins = (amount: number, isClick: boolean, isCrit: boolean) => {
@@ -571,6 +708,9 @@ export function App() {
   };
 
   const handleSignOutFromBanScreen = async () => {
+    const uid = stateRef.current.cloudAccount?.uid;
+    if (uid) clearCloudSaveSignature(uid);
+    offlineCheckedForUidRef.current = null;
     await logoutPlayer();
     setActiveBanRecord(null);
     setState((prev) => {
@@ -760,7 +900,11 @@ export function App() {
       />
 
       {/* UPGRADED LOADING SCREEN ANIMATION (Click PLAY to Start) */}
-      <IntroCutsceneModal isOpen={showIntroCutscene} onComplete={handleCompleteIntro} />
+      <IntroCutsceneModal
+        isOpen={showIntroCutscene}
+        onComplete={handleCompleteIntro}
+        isCloudLoading={isInitialCloudHydrating}
+      />
 
       {/* OFFLINE EARNINGS POPUP */}
       {offlineData && !activeBanRecord && (

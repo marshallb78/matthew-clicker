@@ -1,6 +1,7 @@
 import {
   rtdbRestGet,
   rtdbRestWrite,
+  rtdbRestWriteKeepalive,
   rtdbRestDelete,
   firestoreRestGetDoc,
   firestoreRestListDocs,
@@ -99,26 +100,12 @@ function parseRawEntry(uid: string, d: Record<string, any>): LeaderboardEntry {
   };
 }
 
-/**
- * Publishes the player's validated seasonal score, stats, unlocked skins, and progress snapshot
- * directly to Firebase Realtime Database (`leaderboards/{seasonId}/{uid}`) via stateless REST!
- */
-export async function updateLeaderboardEntry(
+export function buildLeaderboardPayload(
   uid: string,
   username: string,
   state: GameState,
-  seasonId: string = getActiveSeason().seasonId,
-  force = false
-): Promise<boolean> {
-  if (!uid || !username) return false;
-
-  // Never allow banned or temp-banned accounts onto the leaderboard
-  const ban = getCachedBanRecord(uid, username);
-  if (ban) {
-    rtdbRestDelete(`leaderboards/${seasonId}/${uid}`).catch(() => {});
-    return false;
-  }
-
+  nowMs: number = Date.now()
+) {
   const validatedScore = Math.max(
     0,
     Math.floor(Math.max(state.seasonalScore || 0, state.lifetimeCoins || 0))
@@ -130,24 +117,8 @@ export async function updateLeaderboardEntry(
       ? state.unlockedSkins
       : ['classic_matthew'];
   const playtimeSeconds = Math.floor(state.totalPlaytimeSeconds || 0);
-  const playtimeBucket = Math.floor(playtimeSeconds / 30);
 
-  const prev = lastPublishedSnapshotByUid.get(uid);
-  if (
-    !force &&
-    prev &&
-    prev.score === validatedScore &&
-    prev.rebirths === rebirths &&
-    prev.skin === skin &&
-    prev.skinsCount === unlockedSkins.length &&
-    prev.playtimeBucket === playtimeBucket &&
-    prev.username === username
-  ) {
-    return true;
-  }
-
-  const nowMs = Date.now();
-  const payload = {
+  return {
     uid,
     username,
     seasonalScore: validatedScore,
@@ -169,15 +140,68 @@ export async function updateLeaderboardEntry(
     updatedAtMs: nowMs,
     isReset: false,
   };
+}
+
+/**
+ * Synchronous keepalive leaderboard write used on tab/app close.
+ */
+export function updateLeaderboardEntryKeepalive(
+  uid: string,
+  username: string,
+  state: GameState,
+  seasonId: string = getActiveSeason().seasonId
+): void {
+  if (!uid || !username || getCachedBanRecord(uid, username)) return;
+  const payload = buildLeaderboardPayload(uid, username, state, Date.now());
+  rtdbRestWriteKeepalive(`leaderboards/${seasonId}/${uid}`, payload, 'PUT');
+}
+
+/**
+ * Publishes the player's validated seasonal score, stats, unlocked skins, and progress snapshot
+ * directly to Firebase Realtime Database (`leaderboards/{seasonId}/{uid}`) via stateless REST!
+ */
+export async function updateLeaderboardEntry(
+  uid: string,
+  username: string,
+  state: GameState,
+  seasonId: string = getActiveSeason().seasonId,
+  force = false
+): Promise<boolean> {
+  if (!uid || !username) return false;
+
+  // Never allow banned or temp-banned accounts onto the leaderboard
+  const ban = getCachedBanRecord(uid, username);
+  if (ban) {
+    rtdbRestDelete(`leaderboards/${seasonId}/${uid}`).catch(() => {});
+    return false;
+  }
+
+  const nowMs = Date.now();
+  const payload = buildLeaderboardPayload(uid, username, state, nowMs);
+  const playtimeBucket = Math.floor(payload.totalPlaytimeSeconds / 30);
+
+  const prev = lastPublishedSnapshotByUid.get(uid);
+  if (
+    !force &&
+    prev &&
+    prev.score === payload.seasonalScore &&
+    prev.rebirths === payload.rebirthCount &&
+    prev.skin === payload.equippedSkin &&
+    prev.skinsCount === payload.unlockedSkins.length &&
+    prev.playtimeBucket === playtimeBucket &&
+    prev.username === username
+  ) {
+    return true;
+  }
 
   const ok = await rtdbRestWrite(`leaderboards/${seasonId}/${uid}`, payload, 'PUT');
 
   if (ok) {
     lastPublishedSnapshotByUid.set(uid, {
-      score: validatedScore,
-      rebirths,
-      skin,
-      skinsCount: unlockedSkins.length,
+      score: payload.seasonalScore,
+      rebirths: payload.rebirthCount,
+      skin: payload.equippedSkin,
+      skinsCount: payload.unlockedSkins.length,
       playtimeBucket,
       username,
       publishedAtMs: nowMs,

@@ -45,6 +45,13 @@ import { formatTime } from '../src/utils/formatters';
 import { validateUsernameFormat } from '../src/firebase/auth';
 import { AutoClickerDetector } from '../src/utils/antiCheat';
 import { getCachedBanRecord, isDevAdminAccount } from '../src/firebase/moderation';
+import {
+  MARSHALL_RECOVERY_UID,
+  MARSHALL_RECOVERED_SCORE,
+  MARSHALL_RECOVERED_COINS,
+  isProgressSnapshotBetter,
+  reconcileCloudAndLocalState,
+} from '../src/firebase/cloudSave';
 
 describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
   let state = getDefaultGameState();
@@ -346,6 +353,154 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
       expect(isCloudWriteCoolingDown()).toBe(false);
       markCloudWriteQuotaExceeded();
       expect(isCloudWriteCoolingDown()).toBe(true);
+    });
+  });
+
+  describe('Multi-Device Cloud Save Reconciliation & Score Protection', () => {
+    it('prevents an older 2 No save with stale prestigeCount from overwriting 322 Dc cloud progress', () => {
+      const cloud322Dc = {
+        lifetimeCoins: 3.22e35,
+        prestigeCount: 2,
+        saveTs: 1000,
+      };
+      const staleDevice2No = {
+        lifetimeCoins: 2.6e30,
+        prestigeCount: 3,
+        saveTs: Date.now(), // newer local clock shouldn't override massive coin progress
+      };
+      expect(isProgressSnapshotBetter(staleDevice2No, cloud322Dc)).toBe(false);
+      expect(isProgressSnapshotBetter(cloud322Dc, staleDevice2No)).toBe(true);
+
+      // Even if one device just Rebirthed at ~the same lifetimeCoins (within 1%), higher prestige wins
+      const preRebirth = { lifetimeCoins: 5e20, prestigeCount: 3, saveTs: 1000 };
+      const postRebirth = { lifetimeCoins: 5.01e20, prestigeCount: 4, saveTs: 1200 };
+      expect(isProgressSnapshotBetter(postRebirth, preRebirth)).toBe(true);
+    });
+
+    it('prefers newer cloud save when switching to a stale device and isolates different owners', () => {
+      const staleLocal = getDefaultGameState();
+      staleLocal.currentSeasonId = 'season_1';
+      staleLocal.coins = 2.1e30;
+      staleLocal.lifetimeCoins = 2.6e30;
+      staleLocal.seasonalScore = 2.6e30;
+      staleLocal.prestigeCount = 3;
+      staleLocal.lastOwnerUid = 'player_1';
+      staleLocal.lastSaveTime = Date.now();
+
+      const rtdbUser = {
+        uid: 'player_1',
+        username: 'Tester',
+        totalPlaytimeSeconds: 5000,
+        seasons: {
+          season_1: {
+            seasonId: 'season_1',
+            coins: 1.5e35,
+            lifetimeCoins: 2.0e35,
+            seasonalScore: 2.0e35,
+            prestigeCount: 2,
+            lastSaveTime: Date.now() - 30000,
+          },
+        },
+      };
+
+      const res = reconcileCloudAndLocalState({
+        uid: 'player_1',
+        username: 'Tester',
+        localState: staleLocal,
+        rtdbUser,
+        rtdbLb: null,
+        wasExplicitlyReset: false,
+        resetAtMs: 0,
+        activeSeasonId: 'season_1',
+      });
+
+      expect(res.state.coins).toBe(1.5e35);
+      expect(res.state.lifetimeCoins).toBe(2.0e35);
+      expect(res.state.prestigeCount).toBe(3); // Preserved monotonic prestige
+      expect(res.state.lastOwnerUid).toBe('player_1');
+
+      // Switching to a different account on same browser must NOT inherit player_1's coins
+      const otherAcctRes = reconcileCloudAndLocalState({
+        uid: 'player_2',
+        username: 'OtherUser',
+        localState: staleLocal,
+        rtdbUser: { uid: 'player_2', username: 'OtherUser', seasons: { season_1: { seasonId: 'season_1', coins: 50, lifetimeCoins: 50 } } },
+        rtdbLb: null,
+        wasExplicitlyReset: false,
+        resetAtMs: 0,
+        activeSeasonId: 'season_1',
+      });
+      expect(otherAcctRes.state.coins).toBe(50);
+      expect(otherAcctRes.state.lifetimeCoins).toBe(50);
+    });
+
+    it('recovers Marshallb78 lost 322.2 Dc score once in season_1 and does not overwrite coins after rebirth', () => {
+      const staleMarshall = getDefaultGameState();
+      staleMarshall.currentSeasonId = 'season_1';
+      staleMarshall.coins = 2.1e30;
+      staleMarshall.lifetimeCoins = 2.6e30;
+      staleMarshall.seasonalScore = 2.6e30;
+
+      const recovered = reconcileCloudAndLocalState({
+        uid: MARSHALL_RECOVERY_UID,
+        username: 'Marshallb78',
+        localState: staleMarshall,
+        rtdbUser: {
+          uid: MARSHALL_RECOVERY_UID,
+          username: 'Marshallb78',
+          lifetimeAllSeasonsCoins: MARSHALL_RECOVERED_SCORE,
+          lifetimeAllSeasonsClicks: 151114,
+          seasons: {
+            season_1: {
+              seasonId: 'season_1',
+              coins: 2.118e30,
+              lifetimeCoins: 2.619e30,
+              seasonalScore: 2.619e30,
+              clicks: 143463,
+              prestigeCount: 3,
+              prestigeShards: 44,
+            },
+          },
+        },
+        rtdbLb: null,
+        wasExplicitlyReset: false,
+        resetAtMs: 0,
+        activeSeasonId: 'season_1',
+      });
+
+      expect(recovered.recoveredFromCareerLoss).toBe(true);
+      expect(recovered.shouldPushToCloud).toBe(true);
+      expect(recovered.state.lifetimeCoins).toBe(MARSHALL_RECOVERED_SCORE);
+      expect(recovered.state.seasonalScore).toBe(Math.floor(MARSHALL_RECOVERED_SCORE));
+      expect(recovered.state.coins).toBeGreaterThanOrEqual(MARSHALL_RECOVERED_COINS);
+      expect(recovered.state.clicks).toBe(151114);
+
+      // Once recovered (>= MARSHALL_RECOVERED_SCORE), Rebirthing to 0 coins must stay 0 coins!
+      const afterRebirth = reconcileCloudAndLocalState({
+        uid: MARSHALL_RECOVERY_UID,
+        username: 'Marshallb78',
+        localState: { ...recovered.state, coins: 0, prestigeCount: 4 },
+        rtdbUser: {
+          uid: MARSHALL_RECOVERY_UID,
+          username: 'Marshallb78',
+          lifetimeAllSeasonsCoins: MARSHALL_RECOVERED_SCORE,
+          seasons: {
+            season_1: {
+              seasonId: 'season_1',
+              coins: 0,
+              lifetimeCoins: MARSHALL_RECOVERED_SCORE,
+              seasonalScore: Math.floor(MARSHALL_RECOVERED_SCORE),
+              prestigeCount: 4,
+            },
+          },
+        },
+        rtdbLb: null,
+        wasExplicitlyReset: false,
+        resetAtMs: 0,
+        activeSeasonId: 'season_1',
+      });
+      expect(afterRebirth.recoveredFromCareerLoss).toBe(false);
+      expect(afterRebirth.state.coins).toBe(0);
     });
   });
 });

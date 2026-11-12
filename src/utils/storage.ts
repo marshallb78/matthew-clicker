@@ -69,6 +69,7 @@ export function getDefaultGameState(): GameState {
     discoveredEasterEggs: [],
     lastBetaWipeId:
       Date.now() >= BETA_RESET_CONFIG.resetTimeMs ? BETA_RESET_CONFIG.wipeId : null,
+    lastOwnerUid: null,
     cloudAccount: null,
 
     settings: {
@@ -163,14 +164,15 @@ export function performSeasonalRollover(
   };
 }
 
-export function saveGame(state: GameState): boolean {
+export function saveGame(state: GameState, preserveTimestamp = false): boolean {
   try {
     if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
       return false;
     }
     const toSave: GameState = {
       ...state,
-      lastSaveTime: Date.now(),
+      lastOwnerUid: state.cloudAccount?.uid || state.lastOwnerUid || null,
+      lastSaveTime: preserveTimestamp && state.lastSaveTime ? state.lastSaveTime : Date.now(),
     };
     window.localStorage.setItem(SAVE_KEY, JSON.stringify(toSave));
     return true;
@@ -391,6 +393,10 @@ export function sanitizeAndValidateGameState(parsed: any): GameState {
     introCutsceneSeen: Boolean(parsed.introCutsceneSeen),
     discoveredEasterEggs: Array.isArray(parsed.discoveredEasterEggs) ? parsed.discoveredEasterEggs : [],
     lastBetaWipeId: typeof parsed.lastBetaWipeId === 'string' ? parsed.lastBetaWipeId : null,
+    lastOwnerUid:
+      typeof parsed.lastOwnerUid === 'string'
+        ? parsed.lastOwnerUid
+        : parsed.cloudAccount?.uid || null,
     cloudAccount: parsed.cloudAccount && typeof parsed.cloudAccount === 'object' ? parsed.cloudAccount : null,
     settings,
   };
@@ -428,7 +434,7 @@ export function loadGame(): GameState {
     const sanitized = sanitizeAndValidateGameState(parsed);
     const { state: finalState } = performBetaWipeIfDue(sanitized);
 
-    saveGame(finalState);
+    saveGame(finalState, true);
     return finalState;
   } catch (err) {
     console.error('Save file corrupted, recovering default game state:', err);

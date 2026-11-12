@@ -21,9 +21,16 @@ interface UseGameLoopProps {
   setState: React.Dispatch<React.SetStateAction<GameState>>;
   onNotify: (title: string, subtitle: string) => void;
   liveContext?: LiveMultiplierContext;
+  enabled?: boolean;
 }
 
-export function useGameLoop({ state, setState, onNotify, liveContext }: UseGameLoopProps) {
+export function useGameLoop({
+  state,
+  setState,
+  onNotify,
+  liveContext,
+  enabled = true,
+}: UseGameLoopProps) {
   const stateRef = useRef<GameState>(state);
   stateRef.current = state;
 
@@ -43,6 +50,7 @@ export function useGameLoop({ state, setState, onNotify, liveContext }: UseGameL
 
   // TICK INTERVAL (Passive income, timers, combo decay, active gem accrual)
   useEffect(() => {
+    if (!enabled) return;
     let lastTime = performance.now();
 
     const interval = setInterval(() => {
@@ -180,10 +188,11 @@ export function useGameLoop({ state, setState, onNotify, liveContext }: UseGameL
     }, 50);
 
     return () => clearInterval(interval);
-  }, [setState]);
+  }, [setState, enabled]);
 
-  // SEASON BOUNDARY & BACKUP SKIN CHECKER (Every 250ms — stable dependency array!)
+  // SEASON BOUNDARY & BACKUP SKIN CHECKER (Every 500ms — stable dependency array!)
   useEffect(() => {
+    if (!enabled) return;
     const checker = setInterval(() => {
       const current = stateRef.current;
 
@@ -202,10 +211,11 @@ export function useGameLoop({ state, setState, onNotify, liveContext }: UseGameL
     }, 500);
 
     return () => clearInterval(checker);
-  }, [setState]);
+  }, [setState, enabled]);
 
   // AUTOSAVE (Every 5 seconds & on beforeunload)
   useEffect(() => {
+    if (!enabled) return;
     const saveInterval = setInterval(() => {
       saveGame(stateRef.current);
     }, 5000);
@@ -219,5 +229,5 @@ export function useGameLoop({ state, setState, onNotify, liveContext }: UseGameL
       clearInterval(saveInterval);
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, []);
+  }, [enabled]);
 }
