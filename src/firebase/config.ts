@@ -104,7 +104,7 @@ export async function rtdbRestGet<T = any>(
 }
 
 /**
- * Stateless Firebase Realtime Database PUT/PATCH via HTTP REST with Auth Token.
+ * Stateless Firebase Realtime Database PUT/PATCH via HTTP REST.
  * - Unlimited daily writes on the Free Spark plan!
  */
 export async function rtdbRestWrite(
@@ -115,21 +115,66 @@ export async function rtdbRestWrite(
 ): Promise<boolean> {
   const cleanPath = path.replace(/^\/+|\.json$/g, '');
   const token = await getAuthIdToken();
-  if (!token) return false;
+  const url = token
+    ? `${RTDB_REST_BASE}/${cleanPath}.json?auth=${encodeURIComponent(token)}`
+    : `${RTDB_REST_BASE}/${cleanPath}.json`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(
-      `${RTDB_REST_BASE}/${cleanPath}.json?auth=${encodeURIComponent(token)}`,
-      {
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+      signal: controller.signal,
+    });
+    if (res.ok) return true;
+    if (token) {
+      const fallbackRes = await fetch(`${RTDB_REST_BASE}/${cleanPath}.json`, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
         signal: controller.signal,
-      }
-    );
-    return res.ok;
+      });
+      return fallbackRes.ok;
+    }
+    return false;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Stateless Firebase Realtime Database DELETE via HTTP REST.
+ */
+export async function rtdbRestDelete(
+  path: string,
+  timeoutMs = 3500
+): Promise<boolean> {
+  const cleanPath = path.replace(/^\/+|\.json$/g, '');
+  const token = await getAuthIdToken();
+  const url = token
+    ? `${RTDB_REST_BASE}/${cleanPath}.json?auth=${encodeURIComponent(token)}`
+    : `${RTDB_REST_BASE}/${cleanPath}.json`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: 'DELETE',
+      signal: controller.signal,
+    });
+    if (res.ok) return true;
+    if (token) {
+      const fallbackRes = await fetch(`${RTDB_REST_BASE}/${cleanPath}.json`, {
+        method: 'DELETE',
+        signal: controller.signal,
+      });
+      return fallbackRes.ok;
+    }
+    return false;
   } catch {
     return false;
   } finally {

@@ -12,15 +12,23 @@ import { getActiveSeason } from '../utils/scheduleEngine';
 import { ALL_STORM_SKINS, equipSkin, isValidSkinId } from '../data/skins';
 import { GEM_ECONOMY_CONFIG } from '../config/gameConfig';
 import { updateLeaderboardEntry } from './leaderboard';
+import { getCachedBanRecord, refreshCloudBans } from './moderation';
 
 export type CloudSyncStatus = 'idle' | 'syncing' | 'synced' | 'offline_pending' | 'error';
 
 const lastSavedSignatureByUid = new Map<string, string>();
 
+export function clearCloudSaveSignature(uid: string): void {
+  lastSavedSignatureByUid.delete(uid);
+}
+
 /**
- * Loads the player's profile and current seasonal progress from both
- * Firebase Realtime Database (primary, unlimited daily writes) AND legacy Firestore,
- * merging the highest progress across all sources and local state so zero data is ever lost.
+ * Loads the player's profile and current seasonal progress from Firebase Realtime Database
+ * (primary, unlimited daily writes), only falling back to legacy Firestore if the user has never
+ * been saved in Realtime Database.
+ * - Prevents reset accounts from ever pulling back old Firestore scores when signing out and in.
+ * - Prevents rebirthed accounts from getting stale offline earnings on another device.
+ * - Syncs `lastDailyLoginClaimDate` and `totalPlaytimeSeconds` across all devices.
  */
 export async function loadAndReconcileCloudSave(
   uid: string,
@@ -32,29 +40,47 @@ export async function loadAndReconcileCloudSave(
   const activeSeason = getActiveSeason();
 
   try {
-    const [rtdbUser, rtdbLb, fsUser, fsSeason, fsLb] = await Promise.all([
+    const [rtdbUser, rtdbLb] = await Promise.all([
       rtdbRestGet<Record<string, any>>(`users/${uid}`, 3500),
       rtdbRestGet<Record<string, any>>(`leaderboards/${activeSeason.seasonId}/${uid}`, 3500),
-      firestoreRestGetDoc(`users/${uid}`, true, 3500).catch(() => ({
-        exists: false,
-        id: uid,
-        data: {},
-      })),
-      firestoreRestGetDoc(`users/${uid}/seasons/${activeSeason.seasonId}`, true, 3500).catch(
-        () => ({
-          exists: false,
-          id: activeSeason.seasonId,
-          data: {},
-        })
-      ),
-      firestoreRestGetDoc(`leaderboards/${activeSeason.seasonId}/entries/${uid}`, false, 3500).catch(
-        () => ({
+      refreshCloudBans(),
+    ]);
+
+    // Check if account is banned or was recently reset in RTDB
+    const banRecord = getCachedBanRecord(uid, username);
+    const wasExplicitlyReset =
+      Boolean(rtdbUser?.resetAtMs) ||
+      Boolean(rtdbLb?.isReset) ||
+      Boolean(banRecord);
+
+    // Only consult legacy Firestore if the user has NO Realtime Database record at all and wasn't reset/banned
+    let fsUser = { exists: false, id: uid, data: {} as Record<string, any> };
+    let fsSeason = { exists: false, id: activeSeason.seasonId, data: {} as Record<string, any> };
+    let fsLb = { exists: false, id: uid, data: {} as Record<string, any> };
+
+    if (!rtdbUser && !rtdbLb && !wasExplicitlyReset) {
+      [fsUser, fsSeason, fsLb] = await Promise.all([
+        firestoreRestGetDoc(`users/${uid}`, true, 3500).catch(() => ({
           exists: false,
           id: uid,
           data: {},
-        })
-      ),
-    ]);
+        })),
+        firestoreRestGetDoc(`users/${uid}/seasons/${activeSeason.seasonId}`, true, 3500).catch(
+          () => ({
+            exists: false,
+            id: activeSeason.seasonId,
+            data: {},
+          })
+        ),
+        firestoreRestGetDoc(`leaderboards/${activeSeason.seasonId}/entries/${uid}`, false, 3500).catch(
+          () => ({
+            exists: false,
+            id: uid,
+            data: {},
+          })
+        ),
+      ]);
+    }
 
     const hasAnyCloudData =
       Boolean(rtdbUser) ||
@@ -63,22 +89,41 @@ export async function loadAndReconcileCloudSave(
       fsSeason.exists ||
       fsLb.exists;
 
-    if (!hasAnyCloudData) {
+    if (!hasAnyCloudData && !banRecord) {
       saveStateToCloud(uid, username, localState, true).catch(() => {});
       return localState;
     }
 
-    const sources: Record<string, any>[] = [
-      fsLb.exists ? fsLb.data : {},
-      fsSeason.exists ? fsSeason.data : {},
-      fsUser.exists ? fsUser.data : {},
-      rtdbLb || {},
-      rtdbUser?.seasons?.[activeSeason.seasonId] || {},
-      rtdbUser || {},
-    ];
+    // If banned or temp_banned, return zeroed progression state immediately
+    if (banRecord) {
+      const zeroedBannedState = sanitizeAndValidateGameState({
+        ...localState,
+        coins: 0,
+        lifetimeCoins: 0,
+        seasonalScore: 0,
+        clicks: 0,
+        prestigeCount: 0,
+        prestigeShards: 0,
+        lifetimePrestigeShards: 0,
+        upgrades: {},
+        lastSaveTime: Date.now(),
+      });
+      saveGame(zeroedBannedState);
+      return zeroedBannedState;
+    }
 
-    // Pick the single most progressed seasonal snapshot so multi-device logins never mix
-    // stale coins/upgrades across different devices or roll back recent progress.
+    const rtdbSeason = rtdbUser?.seasons?.[activeSeason.seasonId] || null;
+
+    // If RTDB data exists, use ONLY RTDB sources so legacy Firestore never resurrects reset scores or old timestamps
+    const sources: Record<string, any>[] =
+      rtdbUser || rtdbLb
+        ? [rtdbLb || {}, rtdbSeason || {}, rtdbUser || {}]
+        : [
+            fsLb.exists ? fsLb.data : {},
+            fsSeason.exists ? fsSeason.data : {},
+            fsUser.exists ? fsUser.data : {},
+          ];
+
     let bestCloudSeason: Record<string, any> = {};
     let bestCloudPrestige = -1;
     let bestCloudLifetimeCoins = -1;
@@ -96,6 +141,7 @@ export async function loadAndReconcileCloudSave(
     const allClaimedQuests = new Set<string>(localState.claimedQuests || []);
 
     let cloudEquippedSkin: string | null = null;
+    let latestDailyLoginClaimDate: string | null = localState.lastDailyLoginClaimDate || null;
 
     for (const src of sources) {
       if (!src || typeof src !== 'object') continue;
@@ -120,14 +166,18 @@ export async function loadAndReconcileCloudSave(
       if (typeof src.lifetimeAllSeasonsClicks === 'number') {
         maxCareerClicks = Math.max(maxCareerClicks, src.lifetimeAllSeasonsClicks);
       }
-      if (typeof src.clicks === 'number') {
+      if (typeof src.clicks === 'number' && !wasExplicitlyReset) {
         maxCareerClicks = Math.max(maxCareerClicks, src.clicks);
       }
-      if (typeof src.lifetimeAllSeasonsCoins === 'number') {
+      if (typeof src.lifetimeAllSeasonsCoins === 'number' && !wasExplicitlyReset) {
         maxCareerCoins = Math.max(maxCareerCoins, src.lifetimeAllSeasonsCoins);
       }
+      if (typeof src.lastDailyLoginClaimDate === 'string' && src.lastDailyLoginClaimDate) {
+        if (!latestDailyLoginClaimDate || src.lastDailyLoginClaimDate > latestDailyLoginClaimDate) {
+          latestDailyLoginClaimDate = src.lastDailyLoginClaimDate;
+        }
+      }
 
-      // Evaluate whether this source is from the current season (or legacy season_1 when activeSeason is season_1)
       const srcSeasonId = src.seasonId || src.currentSeasonId || activeSeason.seasonId;
       if (srcSeasonId !== activeSeason.seasonId) {
         continue;
@@ -165,9 +215,8 @@ export async function loadAndReconcileCloudSave(
         if (saveTs > 0) bestCloudLastSaveTime = saveTs;
         bestCloudSeason = { ...bestCloudSeason, ...src };
       } else {
-        // Fill in missing fields from secondary sources without overwriting primary numbers
         bestCloudSeason = { ...src, ...bestCloudSeason };
-        if (saveTs > bestCloudLastSaveTime && bestCloudLastSaveTime === 0) {
+        if (saveTs > bestCloudLastSaveTime) {
           bestCloudLastSaveTime = saveTs;
         }
       }
@@ -178,7 +227,13 @@ export async function loadAndReconcileCloudSave(
     const localPrestige = localInActiveSeason ? localState.prestigeCount || 0 : -1;
     const localLifetimeCoins = localInActiveSeason ? localState.lifetimeCoins || 0 : -1;
 
+    // If the cloud account was explicitly reset more recently than local state, cloud wins
+    const resetAtMs = typeof rtdbUser?.resetAtMs === 'number' ? rtdbUser.resetAtMs : 0;
+    const forceCloudAfterReset =
+      resetAtMs > 0 && bestCloudLifetimeCoins === 0 && bestCloudPrestige === 0;
+
     const useCloudBase =
+      forceCloudAfterReset ||
       bestCloudPrestige > localPrestige ||
       (bestCloudPrestige === localPrestige && bestCloudLifetimeCoins >= localLifetimeCoins);
 
@@ -193,85 +248,109 @@ export async function loadAndReconcileCloudSave(
         ? cloudEquippedSkin
         : 'classic_matthew';
 
-    // Determine the true lastSaveTime so older/cloud accounts properly get offline earnings!
-    const cloudSaveTs =
-      bestCloudLastSaveTime ||
-      (typeof rtdbUser?.updatedAtMs === 'number' ? rtdbUser.updatedAtMs : 0) ||
-      (typeof rtdbLb?.updatedAtMs === 'number' ? rtdbLb.updatedAtMs : 0);
+    // Always use the newest timestamp across RTDB season, user doc, and leaderboard so
+    // a Rebirth on one device never uses an older timestamp from the day before on another device!
+    const newestCloudSaveTs = Math.max(
+      bestCloudLastSaveTime || 0,
+      typeof rtdbSeason?.lastSaveTime === 'number' ? rtdbSeason.lastSaveTime : 0,
+      typeof rtdbUser?.updatedAtMs === 'number' ? rtdbUser.updatedAtMs : 0,
+      typeof rtdbLb?.updatedAtMs === 'number' ? rtdbLb.updatedAtMs : 0
+    );
 
-    const effectiveLastSaveTime =
-      useCloudBase && cloudSaveTs > 0
-        ? cloudSaveTs
+    const authUpgrades =
+      authoritativeSeason.upgrades && typeof authoritativeSeason.upgrades === 'object'
+        ? authoritativeSeason.upgrades
+        : {};
+    const hasAnyPassiveUpgrades = Object.values(authUpgrades).some(
+      (cnt) => typeof cnt === 'number' && cnt > 0
+    );
+    const authCoins =
+      typeof authoritativeSeason.coins === 'number'
+        ? authoritativeSeason.coins
+        : localState.coins || 0;
+
+    // If the player just Rebirthed (coins === 0 and no upgrades owned) or was Reset,
+    // reset lastSaveTime to Date.now() so they NEVER receive stale offline earnings on another device!
+    let effectiveLastSaveTime =
+      useCloudBase && newestCloudSaveTs > 0
+        ? newestCloudSaveTs
         : localState.lastSaveTime || Date.now();
+
+    if ((!hasAnyPassiveUpgrades && authCoins === 0) || forceCloudAfterReset) {
+      effectiveLastSaveTime = Date.now();
+    }
 
     const mergedRaw: Partial<GameState> = {
       ...localState,
       ...authoritativeSeason,
-      coins:
-        typeof authoritativeSeason.coins === 'number'
-          ? authoritativeSeason.coins
-          : localState.coins || 0,
-      lifetimeCoins: Math.max(
-        typeof authoritativeSeason.lifetimeCoins === 'number'
-          ? authoritativeSeason.lifetimeCoins
-          : 0,
-        typeof authoritativeSeason.seasonalScore === 'number'
-          ? authoritativeSeason.seasonalScore
-          : 0
-      ),
-      seasonalScore: Math.max(
-        typeof authoritativeSeason.seasonalScore === 'number'
-          ? authoritativeSeason.seasonalScore
-          : 0,
-        Math.floor(
-          typeof authoritativeSeason.lifetimeCoins === 'number'
-            ? authoritativeSeason.lifetimeCoins
-            : 0
-        )
-      ),
-      clicks:
-        typeof authoritativeSeason.clicks === 'number'
-          ? authoritativeSeason.clicks
-          : localState.clicks || 0,
-      criticalClicks:
-        typeof authoritativeSeason.criticalClicks === 'number'
-          ? authoritativeSeason.criticalClicks
-          : localState.criticalClicks || 0,
-      prestigeCount:
-        typeof authoritativeSeason.prestigeCount === 'number'
-          ? authoritativeSeason.prestigeCount
-          : typeof authoritativeSeason.rebirthCount === 'number'
-          ? authoritativeSeason.rebirthCount
-          : 0,
-      prestigeShards:
-        typeof authoritativeSeason.prestigeShards === 'number'
-          ? authoritativeSeason.prestigeShards
-          : 0,
-      lifetimePrestigeShards:
-        typeof authoritativeSeason.lifetimePrestigeShards === 'number'
-          ? authoritativeSeason.lifetimePrestigeShards
-          : 0,
-      upgrades:
-        authoritativeSeason.upgrades && typeof authoritativeSeason.upgrades === 'object'
-          ? authoritativeSeason.upgrades
-          : {},
+      coins: forceCloudAfterReset ? 0 : authCoins,
+      lifetimeCoins: forceCloudAfterReset
+        ? 0
+        : Math.max(
+            typeof authoritativeSeason.lifetimeCoins === 'number'
+              ? authoritativeSeason.lifetimeCoins
+              : 0,
+            typeof authoritativeSeason.seasonalScore === 'number'
+              ? authoritativeSeason.seasonalScore
+              : 0
+          ),
+      seasonalScore: forceCloudAfterReset
+        ? 0
+        : Math.max(
+            typeof authoritativeSeason.seasonalScore === 'number'
+              ? authoritativeSeason.seasonalScore
+              : 0,
+            Math.floor(
+              typeof authoritativeSeason.lifetimeCoins === 'number'
+                ? authoritativeSeason.lifetimeCoins
+                : 0
+            )
+          ),
+      clicks: forceCloudAfterReset
+        ? 0
+        : typeof authoritativeSeason.clicks === 'number'
+        ? authoritativeSeason.clicks
+        : localState.clicks || 0,
+      criticalClicks: forceCloudAfterReset
+        ? 0
+        : typeof authoritativeSeason.criticalClicks === 'number'
+        ? authoritativeSeason.criticalClicks
+        : localState.criticalClicks || 0,
+      prestigeCount: forceCloudAfterReset
+        ? 0
+        : typeof authoritativeSeason.prestigeCount === 'number'
+        ? authoritativeSeason.prestigeCount
+        : typeof authoritativeSeason.rebirthCount === 'number'
+        ? authoritativeSeason.rebirthCount
+        : 0,
+      prestigeShards: forceCloudAfterReset
+        ? 0
+        : typeof authoritativeSeason.prestigeShards === 'number'
+        ? authoritativeSeason.prestigeShards
+        : 0,
+      lifetimePrestigeShards: forceCloudAfterReset
+        ? 0
+        : typeof authoritativeSeason.lifetimePrestigeShards === 'number'
+        ? authoritativeSeason.lifetimePrestigeShards
+        : 0,
+      upgrades: forceCloudAfterReset ? {} : authUpgrades,
       unlockedSkins: mergedSkins,
       equippedSkin: chosenEquippedSkin,
-      gems:
-        typeof authoritativeSeason.gems === 'number'
-          ? authoritativeSeason.gems
-          : typeof rtdbUser?.gems === 'number'
-          ? rtdbUser.gems
-          : localState.gems || 0,
+      gems: Math.max(
+        typeof authoritativeSeason.gems === 'number' ? authoritativeSeason.gems : 0,
+        typeof rtdbUser?.gems === 'number' ? rtdbUser.gems : 0,
+        localState.gems || 0
+      ),
       lifetimeGems: Math.max(
         localState.lifetimeGems || 0,
         typeof rtdbUser?.lifetimeGems === 'number' ? rtdbUser.lifetimeGems : 0
       ),
+      lastDailyLoginClaimDate: latestDailyLoginClaimDate,
       totalPlaytimeSeconds: maxCareerPlaytime,
       lifetimeAllSeasonsClicks: maxCareerClicks,
       lifetimeAllSeasonsCoins: maxCareerCoins,
       permanentAchievements: Array.from(allPermAch),
-      claimedQuests: Array.from(allClaimedQuests),
+      claimedQuests: forceCloudAfterReset ? [] : Array.from(allClaimedQuests),
       currentSeasonId: activeSeason.seasonId,
       lastSaveTime: effectiveLastSaveTime,
       settings: {
@@ -280,15 +359,16 @@ export async function loadAndReconcileCloudSave(
     };
 
     const reconciled = sanitizeAndValidateGameState(mergedRaw);
-    // Preserve effectiveLastSaveTime on the returned object so App.tsx can calculate offline earnings!
     const reconciledWithTimestamp: GameState = {
       ...reconciled,
       lastSaveTime: effectiveLastSaveTime,
     };
     saveGame(reconciled);
 
-    // Immediately sync reconciled profile & leaderboard into Realtime Database
-    saveStateToCloud(uid, username, reconciled, true).catch(() => {});
+    // Sync reconciled profile & leaderboard back to Realtime Database unless it's a fresh 0-score reset
+    if (!forceCloudAfterReset || reconciled.lifetimeCoins > 0) {
+      saveStateToCloud(uid, username, reconciled, true).catch(() => {});
+    }
     return reconciledWithTimestamp;
   } catch (err) {
     console.warn('Cloud reconciliation fallback to local state:', err);
@@ -299,7 +379,6 @@ export async function loadAndReconcileCloudSave(
 /**
  * Persists player profile and seasonal progression directly to Firebase Realtime Database (`users/{uid}`)
  * and updates the Realtime Database Worldwide Leaderboard (`leaderboards/{seasonId}/{uid}`).
- * - Unlimited daily writes on the Free Spark plan!
  */
 export async function saveStateToCloud(
   uid: string,
@@ -309,13 +388,20 @@ export async function saveStateToCloud(
 ): Promise<boolean> {
   if (!uid || !username) return false;
 
+  // Never allow banned or temp-banned players to overwrite cloud state or leaderboard
+  if (getCachedBanRecord(uid, username)) {
+    return false;
+  }
+
   const activeSeason = getActiveSeason();
-  const signature = `${Math.floor(state.lifetimeCoins)}_${Math.floor(state.coins)}_${state.prestigeCount}_${state.equippedSkin}_${state.unlockedSkins.length}_${state.gems}`;
+  const playtimeBucket = Math.floor((state.totalPlaytimeSeconds || 0) / 30);
+  const signature = `${Math.floor(state.lifetimeCoins)}_${Math.floor(state.coins)}_${state.prestigeCount}_${state.equippedSkin}_${state.unlockedSkins.length}_${state.gems}_${state.lastDailyLoginClaimDate || ''}_${playtimeBucket}_${username}`;
 
   if (!force && lastSavedSignatureByUid.get(uid) === signature) {
     return true;
   }
 
+  const nowMs = Date.now();
   const userPayload = {
     uid,
     username,
@@ -326,12 +412,14 @@ export async function saveStateToCloud(
     permanentAchievements: state.permanentAchievements,
     seasonHistory: state.seasonHistory,
     lastDailyLoginClaimDate: state.lastDailyLoginClaimDate,
+    totalPlaytimeSeconds: Math.floor(state.totalPlaytimeSeconds || 0),
     lifetimeAllSeasonsCoins: Math.max(state.lifetimeAllSeasonsCoins || 0, state.lifetimeCoins),
     lifetimeAllSeasonsClicks: Math.max(state.lifetimeAllSeasonsClicks || 0, state.clicks),
     introCutsceneSeen: state.introCutsceneSeen,
     discoveredEasterEggs: state.discoveredEasterEggs || [],
     settings: state.settings,
-    updatedAtMs: Date.now(),
+    resetAtMs: null,
+    updatedAtMs: nowMs,
     seasons: {
       [activeSeason.seasonId]: {
         seasonId: activeSeason.seasonId,
@@ -351,10 +439,10 @@ export async function saveStateToCloud(
         unlockedAchievements: state.unlockedAchievements,
         claimedQuests: state.claimedQuests,
         eventStats: state.eventStats,
-        totalPlaytimeSeconds: state.totalPlaytimeSeconds,
+        totalPlaytimeSeconds: Math.floor(state.totalPlaytimeSeconds || 0),
         goldenMatthewsClicked: state.goldenMatthewsClicked,
         giantMatthewsClicked: state.giantMatthewsClicked || 0,
-        lastSaveTime: Date.now(),
+        lastSaveTime: nowMs,
       },
     },
   };

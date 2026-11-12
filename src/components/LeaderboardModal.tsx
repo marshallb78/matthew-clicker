@@ -71,6 +71,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
             Array.isArray(state.unlockedSkins) && state.unlockedSkins.length > 0
               ? state.unlockedSkins
               : ['classic_matthew'],
+          totalPlaytimeSeconds: Math.floor(state.totalPlaytimeSeconds || 0),
           updatedAtMs: Date.now(),
         };
 
@@ -184,8 +185,8 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                 </div>
               </div>
 
-              {/* 4 STAT CARDS */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 text-center">
+              {/* 5 STAT CARDS INCLUDING PLAYTIME */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5 text-center">
                 <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800">
                   <span className="text-[10px] text-slate-400 uppercase font-black">Score</span>
                   <p className="text-lg font-black text-amber-300 mt-1">
@@ -195,7 +196,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                 <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800">
                   <span className="text-[10px] text-slate-400 uppercase font-black">Ascension</span>
                   <p className="text-lg font-black text-fuchsia-300 mt-1">
-                    {selectedPlayer.entry.ascensionMultiplier}×
+                    {selectedPlayer.entry.ascensionMultiplier.toFixed(2)}×
                   </p>
                 </div>
                 <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800">
@@ -208,6 +209,12 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                   <span className="text-[10px] text-slate-400 uppercase font-black">Rebirths</span>
                   <p className="text-lg font-black text-emerald-300 mt-1">
                     {selectedPlayer.entry.rebirthCount}
+                  </p>
+                </div>
+                <div className="p-4 rounded-2xl bg-slate-900/90 border-2 border-sky-400/50 col-span-2 sm:col-span-1">
+                  <span className="text-[10px] text-sky-300 uppercase font-black">Time Spent</span>
+                  <p className="text-lg font-black text-sky-300 mt-1">
+                    {formatTime(selectedPlayer.entry.totalPlaytimeSeconds || 0)}
                   </p>
                 </div>
               </div>

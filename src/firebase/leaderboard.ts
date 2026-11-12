@@ -1,12 +1,14 @@
 import {
   rtdbRestGet,
   rtdbRestWrite,
+  rtdbRestDelete,
   firestoreRestGetDoc,
   firestoreRestListDocs,
 } from './config';
 import { GameState } from '../types/game';
 import { getActiveSeason } from '../utils/scheduleEngine';
 import { getAscensionMultiplier } from '../data/prestige';
+import { getCachedBanRecord, refreshCloudBans } from './moderation';
 
 export interface LeaderboardEntry {
   uid: string;
@@ -19,6 +21,7 @@ export interface LeaderboardEntry {
   equippedSkin: string;
   unlockedSkins: string[];
   updatedAtMs: number;
+  totalPlaytimeSeconds?: number;
   coins?: number;
   prestigeShards?: number;
   lifetimePrestigeShards?: number;
@@ -27,6 +30,7 @@ export interface LeaderboardEntry {
   upgrades?: Record<string, number>;
   claimedQuests?: string[];
   unlockedAchievements?: string[];
+  isReset?: boolean;
 }
 
 const lastPublishedSnapshotByUid = new Map<
@@ -36,15 +40,26 @@ const lastPublishedSnapshotByUid = new Map<
     rebirths: number;
     skin: string;
     skinsCount: number;
+    playtimeBucket: number;
+    username: string;
     publishedAtMs: number;
   }
 >();
 
-// Cache legacy Firestore entries once per browser session so all 20 pre-existing Firestore players
-// always appear on the leaderboard without using ongoing Firestore read quota!
+// Cache legacy Firestore entries once per browser session so pre-existing Firestore players
+// appear on the leaderboard without using ongoing Firestore read quota.
 const legacyFirestoreMapBySeason = new Map<string, Map<string, LeaderboardEntry>>();
 
+export function evictLeaderboardCacheForUid(uid: string): void {
+  lastPublishedSnapshotByUid.delete(uid);
+  for (const map of legacyFirestoreMapBySeason.values()) {
+    map.delete(uid);
+  }
+}
+
 function parseRawEntry(uid: string, d: Record<string, any>): LeaderboardEntry {
+  const rebirths = typeof d.rebirthCount === 'number' ? d.rebirthCount : 0;
+  const shards = typeof d.prestigeShards === 'number' ? d.prestigeShards : rebirths;
   return {
     uid: d.uid || uid,
     username: d.username || 'Anonymous Matthew',
@@ -56,17 +71,19 @@ function parseRawEntry(uid: string, d: Record<string, any>): LeaderboardEntry {
         ? d.seasonalScore
         : 0,
     totalClicks: typeof d.totalClicks === 'number' ? d.totalClicks : 0,
-    rebirthCount: typeof d.rebirthCount === 'number' ? d.rebirthCount : 0,
+    rebirthCount: rebirths,
     ascensionMultiplier:
       typeof d.ascensionMultiplier === 'number'
         ? d.ascensionMultiplier
-        : 1 + (typeof d.rebirthCount === 'number' ? d.rebirthCount : 0) * 0.05,
+        : getAscensionMultiplier(shards),
     equippedSkin: d.equippedSkin || 'classic_matthew',
     unlockedSkins:
       Array.isArray(d.unlockedSkins) && d.unlockedSkins.length > 0
         ? d.unlockedSkins
         : [d.equippedSkin || 'classic_matthew'],
     updatedAtMs: typeof d.updatedAtMs === 'number' ? d.updatedAtMs : 0,
+    totalPlaytimeSeconds:
+      typeof d.totalPlaytimeSeconds === 'number' ? d.totalPlaytimeSeconds : undefined,
     coins: typeof d.coins === 'number' ? d.coins : undefined,
     prestigeShards: typeof d.prestigeShards === 'number' ? d.prestigeShards : undefined,
     lifetimePrestigeShards:
@@ -78,13 +95,13 @@ function parseRawEntry(uid: string, d: Record<string, any>): LeaderboardEntry {
     unlockedAchievements: Array.isArray(d.unlockedAchievements)
       ? d.unlockedAchievements
       : undefined,
+    isReset: Boolean(d.isReset),
   };
 }
 
 /**
  * Publishes the player's validated seasonal score, stats, unlocked skins, and progress snapshot
  * directly to Firebase Realtime Database (`leaderboards/{seasonId}/{uid}`) via stateless REST!
- * - Unlimited daily writes on the Free Spark plan!
  */
 export async function updateLeaderboardEntry(
   uid: string,
@@ -94,6 +111,13 @@ export async function updateLeaderboardEntry(
   force = false
 ): Promise<boolean> {
   if (!uid || !username) return false;
+
+  // Never allow banned or temp-banned accounts onto the leaderboard
+  const ban = getCachedBanRecord(uid, username);
+  if (ban) {
+    rtdbRestDelete(`leaderboards/${seasonId}/${uid}`).catch(() => {});
+    return false;
+  }
 
   const validatedScore = Math.max(
     0,
@@ -105,6 +129,8 @@ export async function updateLeaderboardEntry(
     Array.isArray(state.unlockedSkins) && state.unlockedSkins.length > 0
       ? state.unlockedSkins
       : ['classic_matthew'];
+  const playtimeSeconds = Math.floor(state.totalPlaytimeSeconds || 0);
+  const playtimeBucket = Math.floor(playtimeSeconds / 30);
 
   const prev = lastPublishedSnapshotByUid.get(uid);
   if (
@@ -113,7 +139,9 @@ export async function updateLeaderboardEntry(
     prev.score === validatedScore &&
     prev.rebirths === rebirths &&
     prev.skin === skin &&
-    prev.skinsCount === unlockedSkins.length
+    prev.skinsCount === unlockedSkins.length &&
+    prev.playtimeBucket === playtimeBucket &&
+    prev.username === username
   ) {
     return true;
   }
@@ -137,7 +165,9 @@ export async function updateLeaderboardEntry(
     upgrades: state.upgrades || {},
     claimedQuests: state.claimedQuests || [],
     unlockedAchievements: state.unlockedAchievements || [],
+    totalPlaytimeSeconds: playtimeSeconds,
     updatedAtMs: nowMs,
+    isReset: false,
   };
 
   const ok = await rtdbRestWrite(`leaderboards/${seasonId}/${uid}`, payload, 'PUT');
@@ -148,6 +178,8 @@ export async function updateLeaderboardEntry(
       rebirths,
       skin,
       skinsCount: unlockedSkins.length,
+      playtimeBucket,
+      username,
       publishedAtMs: nowMs,
     });
   }
@@ -157,16 +189,15 @@ export async function updateLeaderboardEntry(
 
 /**
  * Fetches the top worldwide leaderboard entries for a given season:
- * 1. Reads live Realtime Database (`leaderboards/{seasonId}`) in ~40ms.
- * 2. Merges with existing Firestore entries (cached once per session) so all 20 existing players
- *    and all new Realtime Database updates appear seamlessly together!
+ * 1. Refreshes cloud bans (`bans` & `bans_by_username`) and reads `leaderboards/{seasonId}` from RTDB.
+ * 2. Ignores legacy Firestore data for any UID that exists in RTDB or has been reset/banned.
+ * 3. Filters out all banned and temp-banned accounts automatically.
  */
 export async function fetchWorldwideLeaderboard(
   seasonId: string = getActiveSeason().seasonId,
   maxEntries = 50
 ): Promise<LeaderboardEntry[]> {
   try {
-    // Load legacy Firestore entries once per session if not yet cached
     let legacyPromise: Promise<void> = Promise.resolve();
     if (!legacyFirestoreMapBySeason.has(seasonId)) {
       legacyPromise = firestoreRestListDocs(`leaderboards/${seasonId}/entries`, 100, 3500)
@@ -183,36 +214,51 @@ export async function fetchWorldwideLeaderboard(
 
     const [rtdbObj] = await Promise.all([
       rtdbRestGet<Record<string, Record<string, any>>>(`leaderboards/${seasonId}`, 3500),
+      refreshCloudBans(),
       legacyPromise,
     ]);
 
     const mergedByUid = new Map<string, LeaderboardEntry>();
 
-    // 1. Seed with legacy Firestore entries
+    // 1. Seed with legacy Firestore entries ONLY for UIDs not present in Realtime Database
     const legacyMap = legacyFirestoreMapBySeason.get(seasonId);
     if (legacyMap) {
       for (const [uid, entry] of legacyMap.entries()) {
+        if (rtdbObj && uid in rtdbObj) continue;
+        if (getCachedBanRecord(entry.uid, entry.username)) continue;
         mergedByUid.set(uid, entry);
       }
     }
 
-    // 2. Overlay live Realtime Database entries (taking whichever has the higher score / newer update)
+    // 2. Overlay live Realtime Database entries (authoritative over legacy Firestore)
     if (rtdbObj && typeof rtdbObj === 'object') {
       for (const [uid, raw] of Object.entries(rtdbObj)) {
         if (!raw || typeof raw !== 'object') continue;
         const rtdbEntry = parseRawEntry(uid, raw);
-        const existing = mergedByUid.get(rtdbEntry.uid);
-        if (
-          !existing ||
-          rtdbEntry.seasonalScore >= existing.seasonalScore ||
-          rtdbEntry.updatedAtMs >= existing.updatedAtMs
-        ) {
-          mergedByUid.set(rtdbEntry.uid, rtdbEntry);
+
+        // If this player is banned or temp-banned, purge from RTDB and skip
+        if (getCachedBanRecord(rtdbEntry.uid, rtdbEntry.username)) {
+          rtdbRestDelete(`leaderboards/${seasonId}/${uid}`).catch(() => {});
+          mergedByUid.delete(rtdbEntry.uid);
+          continue;
         }
+
+        // If this account was explicitly reset and still has 0 score, keep them off the board
+        if (rtdbEntry.isReset && rtdbEntry.seasonalScore <= 0) {
+          mergedByUid.delete(rtdbEntry.uid);
+          continue;
+        }
+
+        mergedByUid.set(rtdbEntry.uid, rtdbEntry);
       }
     }
 
-    return sortLeaderboardDeterministically(Array.from(mergedByUid.values())).slice(0, maxEntries);
+    // 3. Final filter against banned usernames/UIDs (in case multiple UIDs share a banned username)
+    const cleanEntries = Array.from(mergedByUid.values()).filter(
+      (entry) => !getCachedBanRecord(entry.uid, entry.username)
+    );
+
+    return sortLeaderboardDeterministically(cleanEntries).slice(0, maxEntries);
   } catch (err) {
     console.warn('Could not fetch worldwide leaderboard:', err);
     return [];
@@ -246,17 +292,24 @@ export async function fetchPlayerLeaderboardEntry(
       3000
     );
     if (rtdbRaw && typeof rtdbRaw === 'object') {
-      return parseRawEntry(uid, rtdbRaw);
+      const parsed = parseRawEntry(uid, rtdbRaw);
+      if (getCachedBanRecord(parsed.uid, parsed.username)) return null;
+      if (parsed.isReset && parsed.seasonalScore <= 0) return null;
+      return parsed;
     }
 
     const legacyMap = legacyFirestoreMapBySeason.get(seasonId);
     if (legacyMap?.has(uid)) {
-      return legacyMap.get(uid) || null;
+      const entry = legacyMap.get(uid) || null;
+      if (entry && getCachedBanRecord(entry.uid, entry.username)) return null;
+      return entry;
     }
 
     const snap = await firestoreRestGetDoc(`leaderboards/${seasonId}/entries/${uid}`, false, 3000);
     if (!snap.exists) return null;
-    return parseRawEntry(uid, snap.data);
+    const entry = parseRawEntry(uid, snap.data);
+    if (getCachedBanRecord(entry.uid, entry.username)) return null;
+    return entry;
   } catch {
     return null;
   }

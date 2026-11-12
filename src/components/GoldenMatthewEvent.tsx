@@ -10,16 +10,30 @@ interface GoldenMatthewEventProps {
   state: GameState;
   setState: React.Dispatch<React.SetStateAction<GameState>>;
   onSpawnBonus: (text: string) => void;
+  forceSpawnCounter?: number;
 }
 
 export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
   state,
   setState,
   onSpawnBonus,
+  forceSpawnCounter = 0,
 }) => {
   const [isActive, setIsActive] = useState(false);
   const [position, setPosition] = useState({ x: 10, y: 30 });
   const [direction, setDirection] = useState<'left' | 'right'>('right');
+
+  useEffect(() => {
+    if (forceSpawnCounter <= 0) return;
+    const startLeft = Math.random() > 0.5;
+    setDirection(startLeft ? 'right' : 'left');
+    setPosition({
+      x: startLeft ? 120 : Math.max(240, window.innerWidth - 360),
+      y: 160 + Math.random() * Math.max(120, window.innerHeight - 400),
+    });
+    setIsActive(true);
+    soundManager.playGoldenSpawn();
+  }, [forceSpawnCounter]);
 
   // Interval timer for spawning Golden Matthew
   useEffect(() => {
@@ -78,13 +92,15 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
     soundManager.playCrit();
     particleEngine.emitClick(e.clientX, e.clientY, true, 25);
 
-    // Scales meaningfully with the player's current production and score without bank-doubling exploits
+    // Huge buffed Golden Matthew reward scaling with Click Power, CPS, and current bank
     const cps = calculateCPS(state);
     const { totalPower } = calculateClickPower(state);
     const productionBounty = Math.floor(
       cps * BALANCE.goldenEvent.bountyCpsSeconds + totalPower * BALANCE.goldenEvent.bountyClickCount
     );
-    const scoreScaledBounty = Math.floor(Math.min(state.coins * 0.08, productionBounty * 2.5));
+    const scoreScaledBounty = Math.floor(
+      Math.min(Math.max(state.coins * 0.25, state.lifetimeCoins * 0.1), productionBounty * 6)
+    );
     const bounty = Math.max(BALANCE.goldenEvent.minBountyFloor, productionBounty, scoreScaledBounty);
 
     setState((prev) => ({

@@ -155,13 +155,15 @@ describe('Automatic Skin Equipping, Locked Skin Enforcement & Fast-Click Animati
       expect(settingsContent).toContain('Visuals &amp; Accessibility');
     });
 
-    it('verifies ClickerArea uses restartable Web Animations API and 20s rapid-clicking zoom overdrive', () => {
+    it('verifies ClickerArea uses restartable Web Animations API, Live CPS Counter, Top 3 Mini Leaderboard, and removes Zoom Bar', () => {
       const clickerPath = path.resolve(__dirname, '../src/components/ClickerArea.tsx');
       const clickerContent = fs.readFileSync(clickerPath, 'utf8');
 
       expect(clickerContent).not.toContain('isSquashing');
+      expect(clickerContent).not.toContain('OVERDRIVE_TARGET_SECONDS');
       expect(clickerContent).toContain('triggerRestartableBounce');
-      expect(clickerContent).toContain('OVERDRIVE_TARGET_SECONDS');
+      expect(clickerContent).toContain('liveCps');
+      expect(clickerContent).toContain('Top 3 Leaders');
     });
   });
 

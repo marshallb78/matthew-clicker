@@ -48,7 +48,39 @@ export function usernameToInternalAuthEmail(username: string): string {
 }
 
 /**
- * Registers a new unique username + password account in Firebase Auth & Firestore.
+ * Resolves the underlying Firebase Auth email for a username (supports renamed accounts!).
+ */
+async function resolveAuthEmailForUsername(normalized: string): Promise<{
+  authEmail: string;
+  displayUsername?: string;
+}> {
+  const fallbackEmail = usernameToInternalAuthEmail(normalized);
+  try {
+    const rtdbEntry = await rtdbRestGet<{
+      uid?: string;
+      username?: string;
+      authEmail?: string;
+    }>(`usernames/${normalized}`, 2000);
+    if (rtdbEntry && typeof rtdbEntry.authEmail === 'string' && rtdbEntry.authEmail.includes('@')) {
+      return {
+        authEmail: rtdbEntry.authEmail,
+        displayUsername: rtdbEntry.username,
+      };
+    }
+    if (rtdbEntry && typeof rtdbEntry.username === 'string') {
+      return {
+        authEmail: fallbackEmail,
+        displayUsername: rtdbEntry.username,
+      };
+    }
+  } catch {
+    // use fallback
+  }
+  return { authEmail: fallbackEmail };
+}
+
+/**
+ * Registers a new unique username + password account in Firebase Auth & RTDB.
  */
 export async function registerWithUsername(
   username: string,
@@ -86,7 +118,6 @@ export async function registerWithUsername(
 
   const user = credential.user;
 
-  // Non-blocking username registry write + profile displayName update
   try {
     await Promise.race([
       updateProfile(user, { displayName: cleanDisplayUsername }),
@@ -100,6 +131,7 @@ export async function registerWithUsername(
     uid: user.uid,
     username: cleanDisplayUsername,
     normalizedUsername: normalized,
+    authEmail: internalEmail,
     createdAtMs: Date.now(),
   }).catch(() => {});
 
@@ -130,17 +162,17 @@ export async function loginWithUsername(
   }
 
   const normalized = normalizeUsername(username);
-  const internalEmail = usernameToInternalAuthEmail(normalized);
+  const { authEmail, displayUsername: mappedDisplay } = await resolveAuthEmailForUsername(normalized);
 
   try {
-    const credential = await signInWithEmailAndPassword(auth, internalEmail, password);
+    const credential = await signInWithEmailAndPassword(auth, authEmail, password);
     const user = credential.user;
-    const displayUsername = user.displayName || username.trim();
+    const displayUsername = mappedDisplay || user.displayName || username.trim();
 
     return {
       uid: user.uid,
       username: displayUsername,
-      normalizedUsername: normalized,
+      normalizedUsername: normalizeUsername(displayUsername),
     };
   } catch (err: any) {
     if (
@@ -210,11 +242,7 @@ function authenticateLocalFallback(
 }
 
 /**
- * Unified Sign In / Create Account:
- * 1. Attempts Firebase Auth `signInWithEmailAndPassword` directly first (zero Firestore quota needed!).
- * 2. If the user does not exist yet, creates the account via `createUserWithEmailAndPassword`.
- * 3. If the account already exists (`auth/email-already-in-use`), throws a clear wrong-password error.
- * 4. Never hangs if Firestore writes are throttled.
+ * Unified Sign In / Create Account (supports renamed accounts seamlessly).
  */
 export async function authenticateUnified(
   username: string,
@@ -234,35 +262,33 @@ export async function authenticateUnified(
     return authenticateLocalFallback(cleanDisplayUsername, normalized, password);
   }
 
-  const internalEmail = usernameToInternalAuthEmail(normalized);
+  const { authEmail, displayUsername: mappedDisplay } = await resolveAuthEmailForUsername(normalized);
 
-  // Step 1: Try signing in directly with Firebase Auth (fastest path, 0 Firestore reads/writes)
+  // Step 1: Try signing in directly with Firebase Auth
   try {
-    const signInCred = await signInWithEmailAndPassword(auth, internalEmail, password);
+    const signInCred = await signInWithEmailAndPassword(auth, authEmail, password);
     const user = signInCred.user;
-    let displayUsername = user.displayName || cleanDisplayUsername;
+    let displayUsername = mappedDisplay || user.displayName || cleanDisplayUsername;
 
-    if (!user.displayName) {
-      try {
-        const rtdbUser = await rtdbRestGet<{ username?: string }>(`usernames/${normalized}`, 2000);
-        if (rtdbUser && typeof rtdbUser.username === 'string') {
-          displayUsername = rtdbUser.username;
-        } else {
-          const docSnap = await firestoreRestGetDoc(`usernames/${normalized}`, false, 2000);
-          if (docSnap.exists && typeof docSnap.data.username === 'string') {
-            displayUsername = docSnap.data.username;
-          }
+    try {
+      const userDoc = await rtdbRestGet<{ username?: string }>(`users/${user.uid}`, 2000);
+      if (userDoc && typeof userDoc.username === 'string' && userDoc.username.trim().length >= 3) {
+        displayUsername = userDoc.username.trim();
+      } else if (!user.displayName) {
+        const docSnap = await firestoreRestGetDoc(`usernames/${normalized}`, false, 2000);
+        if (docSnap.exists && typeof docSnap.data.username === 'string') {
+          displayUsername = docSnap.data.username;
         }
-      } catch {
-        // use cleanDisplayUsername
       }
+    } catch {
+      // use displayUsername
     }
 
     return {
       account: {
         uid: user.uid,
         username: displayUsername,
-        normalizedUsername: normalized,
+        normalizedUsername: normalizeUsername(displayUsername),
       },
       isNewAccount: false,
     };
@@ -274,10 +300,10 @@ export async function authenticateUnified(
     if (code === 'auth/too-many-requests') {
       throw new Error('Too many failed attempts. Please wait a moment and try again.');
     }
-    // If invalid-credential or user-not-found, check if we can register this username as a new account
   }
 
   // Step 2: Try creating the account in Firebase Auth
+  const internalEmail = usernameToInternalAuthEmail(normalized);
   try {
     const createCred = await createUserWithEmailAndPassword(auth, internalEmail, password);
     const user = createCred.user;
@@ -291,11 +317,11 @@ export async function authenticateUnified(
       // ignore
     }
 
-    // Non-blocking write to Realtime Database usernames registry
     rtdbRestWrite(`usernames/${normalized}`, {
       uid: user.uid,
       username: cleanDisplayUsername,
       normalizedUsername: normalized,
+      authEmail: internalEmail,
       createdAtMs: Date.now(),
     }).catch(() => {});
 
@@ -310,7 +336,6 @@ export async function authenticateUnified(
   } catch (createErr: any) {
     const code = createErr?.code || '';
     if (code === 'auth/email-already-in-use') {
-      // Account exists in Firebase Auth, which means the password in Step 1 was wrong!
       throw new Error('Invalid username or password.');
     }
     if (code === 'auth/too-many-requests') {
@@ -320,6 +345,129 @@ export async function authenticateUnified(
       return authenticateLocalFallback(cleanDisplayUsername, normalized, password);
     }
     throw new Error(createErr?.message || 'Authentication failed. Please try again.');
+  }
+}
+
+/**
+ * Changes a player's username across Firebase Auth, RTDB `usernames`, `users/{uid}`, and `leaderboards`.
+ */
+export async function changeAccountUsername(
+  uid: string,
+  oldUsername: string,
+  newUsername: string,
+  seasonId: string = 'season_1'
+): Promise<string> {
+  const formatErr = validateUsernameFormat(newUsername);
+  if (formatErr) throw new Error(formatErr);
+
+  const cleanNew = newUsername.trim();
+  const newNorm = normalizeUsername(cleanNew);
+  const oldNorm = normalizeUsername(oldUsername);
+
+  if (newNorm === oldNorm && cleanNew === oldUsername.trim()) {
+    return cleanNew;
+  }
+
+  // Check if another player already owns this username
+  const existing = await rtdbRestGet<{ uid?: string }>(`usernames/${newNorm}`, 2500);
+  if (existing && existing.uid && existing.uid !== uid) {
+    throw new Error(`Username "${cleanNew}" is already taken!`);
+  }
+
+  const { auth } = getFirebaseServices();
+  const currentUser = auth?.currentUser;
+  const authEmail =
+    currentUser?.email ||
+    (await resolveAuthEmailForUsername(oldNorm)).authEmail ||
+    usernameToInternalAuthEmail(oldNorm);
+
+  if (currentUser) {
+    try {
+      await Promise.race([
+        updateProfile(currentUser, { displayName: cleanNew }),
+        new Promise((resolve) => setTimeout(resolve, 2000)),
+      ]);
+    } catch {
+      // ignore
+    }
+  }
+
+  await Promise.all([
+    rtdbRestWrite(
+      `usernames/${newNorm}`,
+      {
+        uid,
+        username: cleanNew,
+        normalizedUsername: newNorm,
+        authEmail,
+        updatedAtMs: Date.now(),
+      },
+      'PUT'
+    ),
+    oldNorm && oldNorm !== newNorm
+      ? rtdbRestWrite(
+          `usernames/${oldNorm}`,
+          {
+            uid,
+            username: cleanNew,
+            normalizedUsername: newNorm,
+            authEmail,
+            redirectedTo: newNorm,
+            updatedAtMs: Date.now(),
+          },
+          'PUT'
+        )
+      : Promise.resolve(true),
+    rtdbRestWrite(
+      `users/${uid}`,
+      {
+        username: cleanNew,
+        updatedAtMs: Date.now(),
+      },
+      'PATCH'
+    ),
+    rtdbRestWrite(
+      `leaderboards/${seasonId}/${uid}`,
+      {
+        uid,
+        username: cleanNew,
+        updatedAtMs: Date.now(),
+      },
+      'PATCH'
+    ),
+  ]);
+
+  return cleanNew;
+}
+
+/**
+ * Re-verifies a player's password (used to unlock Marshallb78's Dev Tools panel).
+ */
+export async function verifyAccountPassword(
+  username: string,
+  password: string
+): Promise<boolean> {
+  if (!password) return false;
+  const { auth } = getFirebaseServices();
+  if (!auth) return false;
+
+  const normalized = normalizeUsername(username);
+  const { authEmail } = await resolveAuthEmailForUsername(normalized);
+  const currentEmail = auth.currentUser?.email || authEmail;
+
+  try {
+    await signInWithEmailAndPassword(auth, currentEmail, password);
+    return true;
+  } catch {
+    if (currentEmail !== authEmail) {
+      try {
+        await signInWithEmailAndPassword(auth, authEmail, password);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
   }
 }
 
@@ -346,13 +494,21 @@ export function subscribeToAuthChanges(
     return () => {};
   }
 
-  return onAuthStateChanged(auth, (user: User | null) => {
+  return onAuthStateChanged(auth, async (user: User | null) => {
     if (!user) {
       callback(null);
       return;
     }
     const emailPrefix = user.email ? user.email.split('@')[0] : 'player';
-    const username = user.displayName || emailPrefix;
+    let username = user.displayName || emailPrefix;
+    try {
+      const userDoc = await rtdbRestGet<{ username?: string }>(`users/${user.uid}`, 2000);
+      if (userDoc && typeof userDoc.username === 'string' && userDoc.username.trim().length >= 3) {
+        username = userDoc.username.trim();
+      }
+    } catch {
+      // ignore
+    }
     callback({
       uid: user.uid,
       username,

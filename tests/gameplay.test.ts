@@ -43,6 +43,8 @@ import {
 } from '../src/utils/scheduleEngine';
 import { formatTime } from '../src/utils/formatters';
 import { validateUsernameFormat } from '../src/firebase/auth';
+import { AutoClickerDetector } from '../src/utils/antiCheat';
+import { getCachedBanRecord, isDevAdminAccount } from '../src/firebase/moderation';
 
 describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
   let state = getDefaultGameState();
@@ -93,44 +95,71 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
       expect(maxInfo.totalCost).toBeLessThanOrEqual(coins);
     });
 
-    it('scales click power and CPS with buffed Ascension Multiplier (+0.08 per step) and Friday 4x Live Event', () => {
+    it('scales click power and CPS with faster Ascension Multiplier (+0.15 per step) and Friday 4x Live Event', () => {
       state.upgrades['finger_exercise'] = 10; // base click = 1 + 10*0.5 = 6, base CPS = 10*0.2 = 2
       state.upgrades['energy_coffee'] = 10; // base CPS = 2 + 10*0.5 = 7, +10*1.5 = 15 click power -> total base click = 21
-      state.prestigeShards = 25; // Ascension Multiplier = 1 + 25 * 0.08 = 3.0x
+      state.prestigeShards = 20; // Ascension Multiplier = 1 + 20 * 0.15 = 4.0x
 
       const normalClick = calculateClickPower(state);
       const normalCps = calculateCPS(state);
-      expect(normalClick.ascensionMultiplier).toBe(3);
-      expect(normalClick.totalPower).toBe(63); // 21 * 3x
-      expect(normalCps).toBeCloseTo(21); // 7 * 3x
+      expect(normalClick.ascensionMultiplier).toBe(4);
+      expect(normalClick.totalPower).toBe(84); // 21 * 4x
+      expect(normalCps).toBeCloseTo(28); // 7 * 4x
 
       // Friday All-Day Live Event = 4x multiplier
       const liveOpts = { fridayBonusActive: false, stormWaveMultiplier: 4 };
       const boostedClick = calculateClickPower(state, liveOpts);
       const boostedCps = calculateCPS(state, liveOpts);
 
-      expect(boostedClick.totalPower).toBe(252); // 63 * 4
-      expect(boostedCps).toBeCloseTo(84.0); // 21 * 4
+      expect(boostedClick.totalPower).toBe(336); // 84 * 4
+      expect(boostedCps).toBeCloseTo(112.0); // 28 * 4
 
       const giantReward = calculateGiantMatthewClickReward(state, liveOpts);
       expect(giantReward).toBeGreaterThan(boostedClick.totalPower);
     });
   });
 
-  describe('Rebirth (Buffed Ascension Multiplier: +0.08 per step)', () => {
+  describe('Rebirth (Faster Ascension Multiplier: +0.15 per step)', () => {
     it('returns 0 bonus if lifetime coins are below requirement (1M)', () => {
       expect(calculatePrestigeShards(500000)).toBe(0);
       expect(getAscensionMultiplier(0)).toBe(1);
     });
 
-    it('calculates Ascension Multiplier bonus in +0.08 steps at 1M and scales smoothly', () => {
+    it('calculates Ascension Multiplier bonus in +0.15 steps at 1M and scales faster', () => {
       expect(calculatePrestigeShards(1000000)).toBe(1);
-      expect(calculatePrestigeShards(4000000)).toBe(2);
-      expect(getAscensionMultiplier(1)).toBe(1.08);
-      expect(getAscensionMultiplier(2)).toBe(1.16);
+      expect(calculatePrestigeShards(4000000)).toBe(3);
+      expect(getAscensionMultiplier(1)).toBe(1.15);
+      expect(getAscensionMultiplier(2)).toBe(1.3);
       const qaShards = calculatePrestigeShards(1e15);
-      expect(getAscensionMultiplier(qaShards)).toBeGreaterThan(2.5);
-      expect(getAscensionMultiplier(qaShards)).toBeLessThan(6.0);
+      expect(getAscensionMultiplier(qaShards)).toBeGreaterThan(5.0);
+    });
+  });
+
+  describe('Anti-Cheat Auto-Clicker Detector & Moderation Bans', () => {
+    it('flags >17 CPS clicking and robotic perfect-timing clicks, and enforces bans on liamkd, wessy, and dryce', () => {
+      const detector = new AutoClickerDetector();
+      let flagged = false;
+      for (let i = 0; i < 19; i++) {
+        const res = detector.recordClick(1000 + i * 50); // 19 clicks within 900ms (>17 CPS)
+        if (res.flagged) flagged = true;
+      }
+      expect(flagged).toBe(true);
+
+      // Robotic timing test (12.5 CPS with exact 80ms interval for 25 clicks)
+      const robotDetector = new AutoClickerDetector();
+      let robotFlagged = false;
+      for (let i = 0; i < 26; i++) {
+        const res = robotDetector.recordClick(5000 + i * 80);
+        if (res.flagged) robotFlagged = true;
+      }
+      expect(robotFlagged).toBe(true);
+
+      // Default banned accounts
+      expect(getCachedBanRecord(null, 'liamkd')?.status).toBe('banned');
+      expect(getCachedBanRecord(null, 'wessy')?.status).toBe('banned');
+      expect(getCachedBanRecord(null, 'dryce')?.status).toBe('banned');
+      expect(getCachedBanRecord('89nsfff2YtaEVcNTHUBDq22V4FW2', 'Marshallb78')).toBeNull();
+      expect(isDevAdminAccount('89nsfff2YtaEVcNTHUBDq22V4FW2', 'Marshallb78')).toBe(true);
     });
   });
 

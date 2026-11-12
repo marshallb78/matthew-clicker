@@ -5,6 +5,7 @@ import { getSkinById } from '../data/skins';
 import { getAscensionMultiplier } from '../data/prestige';
 import {
   authenticateUnified,
+  changeAccountUsername,
   logoutPlayer,
   validateUsernameFormat,
 } from '../firebase/auth';
@@ -61,6 +62,7 @@ export const EscMenuModal: React.FC<EscMenuModalProps> = ({
   const [activeTab, setActiveTab] = useState<'hub' | 'account' | 'settings'>('hub');
   const [username, setUsername] = useState(state.cloudAccount?.displayUsername || '');
   const [password, setPassword] = useState('');
+  const [newUsernameInput, setNewUsernameInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
@@ -167,6 +169,47 @@ export const EscMenuModal: React.FC<EscMenuModalProps> = ({
         return next;
       });
       onNotify('SIGNED OUT', 'Signed out of cloud account.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRenameAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!state.cloudAccount) return;
+    setError(null);
+    setSyncMessage(null);
+
+    const validationErr = validateUsernameFormat(newUsernameInput);
+    if (validationErr) {
+      setError(validationErr);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const updatedName = await changeAccountUsername(
+        state.cloudAccount.uid,
+        state.cloudAccount.displayUsername,
+        newUsernameInput
+      );
+      const nextState: GameState = {
+        ...state,
+        cloudAccount: {
+          ...state.cloudAccount,
+          username: updatedName,
+          displayUsername: updatedName,
+          lastCloudSync: Date.now(),
+        },
+      };
+      setState(nextState);
+      saveGame(nextState);
+      await saveStateToCloud(nextState.cloudAccount!.uid, updatedName, nextState, true);
+      setNewUsernameInput('');
+      setSyncMessage(`Username changed to ${updatedName}!`);
+      onNotify('USERNAME UPDATED!', `Your account name is now ${updatedName}!`);
+    } catch (err: unknown) {
+      setError((err as Error).message || 'Could not change username.');
     } finally {
       setLoading(false);
     }
@@ -443,6 +486,32 @@ export const EscMenuModal: React.FC<EscMenuModalProps> = ({
                       </p>
                     </div>
                   </div>
+
+                  {/* CHANGE ACCOUNT NAME */}
+                  <form
+                    onSubmit={handleRenameAccount}
+                    className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2 text-left"
+                  >
+                    <label className="text-[10px] font-black uppercase text-cyan-300 block">
+                      Change Account Name
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newUsernameInput}
+                        onChange={(e) => setNewUsernameInput(e.target.value)}
+                        placeholder="New Username (3-18 chars)"
+                        className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white focus:outline-none focus:border-cyan-400"
+                      />
+                      <button
+                        type="submit"
+                        disabled={loading || !newUsernameInput.trim()}
+                        className="px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-black text-xs uppercase cursor-pointer transition shrink-0"
+                      >
+                        Rename
+                      </button>
+                    </div>
+                  </form>
 
                   {syncMessage && (
                     <div className="p-3 rounded-2xl bg-emerald-950/60 border border-emerald-500/40 text-xs text-emerald-200 flex items-center justify-center gap-2 font-black">

@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { GameState } from '../types/game';
 import { getAscensionMultiplier } from '../data/prestige';
 import { getDefaultGameState, saveGame } from '../utils/storage';
-import { saveStateToCloud } from '../firebase/cloudSave';
-import { updateLeaderboardEntry } from '../firebase/leaderboard';
+import { clearCloudSaveSignature, saveStateToCloud } from '../firebase/cloudSave';
+import { evictLeaderboardCacheForUid } from '../firebase/leaderboard';
+import { adminResetPlayerScore } from '../firebase/moderation';
 import { soundManager } from '../audio/soundManager';
 import { formatCoins, formatNumber, formatTime } from '../utils/formatters';
 import {
@@ -44,15 +45,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setConfirmReset(false);
 
     if (resetState.cloudAccount) {
+      clearCloudSaveSignature(resetState.cloudAccount.uid);
+      evictLeaderboardCacheForUid(resetState.cloudAccount.uid);
       await saveStateToCloud(
         resetState.cloudAccount.uid,
         resetState.cloudAccount.displayUsername,
-        resetState
+        resetState,
+        true
       );
-      await updateLeaderboardEntry(
+      await adminResetPlayerScore(
         resetState.cloudAccount.uid,
-        resetState.cloudAccount.displayUsername,
-        resetState
+        resetState.cloudAccount.displayUsername
       );
     }
   };

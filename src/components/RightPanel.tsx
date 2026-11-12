@@ -17,6 +17,7 @@ import {
 import { getAuthoritativeDateString } from '../utils/scheduleEngine';
 import { GEM_ECONOMY_CONFIG } from '../config/gameConfig';
 import { saveGame } from '../utils/storage';
+import { saveStateToCloud } from '../firebase/cloudSave';
 import { formatCoins } from '../utils/formatters';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
@@ -111,7 +112,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
     });
   };
 
-  // --- REBIRTH (CAPYBARA CLICKER STYLE ASCENSION MULTIPLIER: +0.08× PER STEP) ---
+  // --- REBIRTH (ASCENSION MULTIPLIER: +0.15× PER STEP) ---
   const currentAscensionMult = getAscensionMultiplier(state.prestigeShards);
   const potentialBonus = calculatePrestigeShards(state.lifetimeCoins);
   const multGain = Math.max(0, potentialBonus - state.lifetimePrestigeShards);
@@ -126,6 +127,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
     soundManager.playPrestige();
     particleEngine.emitPrestige();
 
+    const nowMs = Date.now();
     setState((prev) => {
       const next: GameState = {
         ...prev,
@@ -137,9 +139,18 @@ export const RightPanel: React.FC<RightPanelProps> = ({
         prestigeCount: prev.prestigeCount + 1,
         prestigeShards: prev.prestigeShards + multGain,
         lifetimePrestigeShards: prev.lifetimePrestigeShards + multGain,
-        lastActiveInputTimestamp: Date.now(),
+        lastSaveTime: nowMs,
+        lastActiveInputTimestamp: nowMs,
       };
       saveGame(next);
+      if (next.cloudAccount) {
+        saveStateToCloud(
+          next.cloudAccount.uid,
+          next.cloudAccount.displayUsername,
+          next,
+          true
+        ).catch(() => {});
+      }
       return next;
     });
 
@@ -160,16 +171,27 @@ export const RightPanel: React.FC<RightPanelProps> = ({
     soundManager.playBuy();
     particleEngine.emitPrestige();
 
+    const nowMs = Date.now();
     setState((prev) => {
+      if (prev.lastDailyLoginClaimDate === todayDateStr) return prev;
       const bonus = GEM_ECONOMY_CONFIG.dailyLoginGems;
       const next: GameState = {
         ...prev,
         gems: prev.gems + bonus,
         lifetimeGems: prev.lifetimeGems + bonus,
         lastDailyLoginClaimDate: todayDateStr,
-        lastActiveInputTimestamp: Date.now(),
+        lastSaveTime: nowMs,
+        lastActiveInputTimestamp: nowMs,
       };
       saveGame(next);
+      if (next.cloudAccount) {
+        saveStateToCloud(
+          next.cloudAccount.uid,
+          next.cloudAccount.displayUsername,
+          next,
+          true
+        ).catch(() => {});
+      }
       return next;
     });
 

@@ -11,9 +11,19 @@ import {
   evaluateMatthewStormState,
 } from './utils/scheduleEngine';
 import { MATTHEW_STORM_CONFIG } from './config/gameConfig';
-import { subscribeToAuthChanges } from './firebase/auth';
+import { logoutPlayer, subscribeToAuthChanges } from './firebase/auth';
 import { loadAndReconcileCloudSave, saveStateToCloud } from './firebase/cloudSave';
-import { updateLeaderboardEntry } from './firebase/leaderboard';
+import {
+  LeaderboardEntry,
+  fetchWorldwideLeaderboard,
+  updateLeaderboardEntry,
+} from './firebase/leaderboard';
+import {
+  BanRecord,
+  checkAccountBanStatus,
+  isDevAdminAccount,
+  triggerAutoTempBan,
+} from './firebase/moderation';
 import { useGameLoop } from './hooks/useGameLoop';
 import { ClickerArea } from './components/ClickerArea';
 import { RightPanel } from './components/RightPanel';
@@ -27,6 +37,8 @@ import { MatthewStormModal } from './components/MatthewStormModal';
 import { IntroCutsceneModal } from './components/IntroCutsceneModal';
 import { EscMenuModal } from './components/EscMenuModal';
 import { SeasonDowntimeModal } from './components/SeasonDowntimeModal';
+import { BannedScreenModal } from './components/BannedScreenModal';
+import { DevToolsModal } from './components/DevToolsModal';
 import { soundManager } from './audio/soundManager';
 import { BALANCE } from './data/balance';
 import { X, Sparkles, ChevronUp, ChevronDown } from 'lucide-react';
@@ -45,7 +57,12 @@ export function App() {
   const [showLeaderboardModal, setShowLeaderboardModal] = useState(false);
   const [showStormShop, setShowStormShop] = useState(false);
   const [showStormRecap, setShowStormRecap] = useState(false);
+  const [showDevToolsModal, setShowDevToolsModal] = useState(false);
   const [showIntroCutscene, setShowIntroCutscene] = useState<boolean>(true);
+
+  const [activeBanRecord, setActiveBanRecord] = useState<BanRecord | null>(null);
+  const [top3Players, setTop3Players] = useState<LeaderboardEntry[]>([]);
+  const [goldenSpawnCounter, setGoldenSpawnCounter] = useState(0);
 
   // Schedule & Live Event state
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
@@ -85,6 +102,76 @@ export function App() {
     }, 3500);
   };
 
+  const applyLocalBanReset = (ban: BanRecord) => {
+    setActiveBanRecord(ban);
+    setOfflineData(null);
+    setState((prev) => {
+      const zeroed: GameState = {
+        ...prev,
+        coins: 0,
+        lifetimeCoins: 0,
+        seasonalScore: 0,
+        clicks: 0,
+        criticalClicks: 0,
+        combo: 0,
+        upgrades: {},
+        prestigeCount: 0,
+        prestigeShards: 0,
+        lifetimePrestigeShards: 0,
+        lastSaveTime: Date.now(),
+      };
+      saveGame(zeroed);
+      return zeroed;
+    });
+  };
+
+  const refreshMiniLeaderboard = async () => {
+    try {
+      const entries = await fetchWorldwideLeaderboard(getActiveSeason().seasonId, 5);
+      setTop3Players(entries.slice(0, 3));
+    } catch {
+      // ignore transient error
+    }
+  };
+
+  // Poll cloud bans & refresh Top 3 Mini Leaderboard every 5-12 seconds so banned players are locked even while playing
+  useEffect(() => {
+    const checkBanAndLeaderboard = async () => {
+      const curr = stateRef.current;
+      const uid = curr.cloudAccount?.uid || null;
+      const username =
+        curr.cloudAccount?.displayUsername || curr.cloudAccount?.username || null;
+
+      const ban = await checkAccountBanStatus(uid, username, true);
+      if (ban) {
+        applyLocalBanReset(ban);
+      } else {
+        setActiveBanRecord((prev) => (prev && prev.uid.startsWith('local_') ? prev : null));
+      }
+      await refreshMiniLeaderboard();
+    };
+
+    checkBanAndLeaderboard();
+    const interval = setInterval(checkBanAndLeaderboard, 6000);
+    return () => clearInterval(interval);
+  }, [state.cloudAccount?.uid, state.cloudAccount?.displayUsername]);
+
+  // Auto-Clicker Detector callback (>17 CPS or Robotic Perfect-Timing Clicks)
+  const handleAutoCheatDetected = async (reason: string, detectedCps: number) => {
+    const curr = stateRef.current;
+    const uid = curr.cloudAccount?.uid || '';
+    const username =
+      curr.cloudAccount?.displayUsername || curr.cloudAccount?.username || 'Guest Player';
+
+    if (isDevAdminAccount(uid, username)) return;
+
+    const record = await triggerAutoTempBan(uid, username, reason, detectedCps);
+    if (record) {
+      applyLocalBanReset(record);
+      refreshMiniLeaderboard();
+    }
+  };
+
   // Disable right-click context menu globally so fast trackpad clicking never opens a browser menu
   useEffect(() => {
     const preventContextMenu = (e: MouseEvent) => {
@@ -98,9 +185,13 @@ export function App() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (showIntroCutscene) return;
+      if (showIntroCutscene || activeBanRecord) return;
       e.preventDefault();
 
+      if (showDevToolsModal) {
+        setShowDevToolsModal(false);
+        return;
+      }
       if (showSkinQualityModal) {
         setShowSkinQualityModal(false);
         return;
@@ -117,7 +208,14 @@ export function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showIntroCutscene, showSkinQualityModal, showLeaderboardModal, showStormShop]);
+  }, [
+    showIntroCutscene,
+    activeBanRecord,
+    showDevToolsModal,
+    showSkinQualityModal,
+    showLeaderboardModal,
+    showStormShop,
+  ]);
 
   // 1-second schedule ticker
   useEffect(() => {
@@ -136,10 +234,16 @@ export function App() {
 
   // Mandatory Sign-In: Only show the Sign In popup automatically if the player is NOT signed in!
   useEffect(() => {
-    if (!showIntroCutscene && !state.cloudAccount && !showAccountModal && !showEscMenu) {
+    if (
+      !showIntroCutscene &&
+      !activeBanRecord &&
+      !state.cloudAccount &&
+      !showAccountModal &&
+      !showEscMenu
+    ) {
       setShowAccountModal(true);
     }
-  }, [showIntroCutscene, state.cloudAccount, showAccountModal, showEscMenu]);
+  }, [showIntroCutscene, activeBanRecord, state.cloudAccount, showAccountModal, showEscMenu]);
 
   // Detect Matthew Storm wave transitions and event completion
   useEffect(() => {
@@ -199,13 +303,19 @@ export function App() {
       if (!profile) return;
       isReconcilingCloudRef.current = true;
       try {
+        const ban = await checkAccountBanStatus(profile.uid, profile.username, true);
+        if (ban) {
+          applyLocalBanReset(ban);
+          return;
+        }
+
         const merged = await loadAndReconcileCloudSave(
           profile.uid,
           profile.username,
           stateRef.current
         );
 
-        // Award offline earnings for older/cloud accounts based on their cloud save timestamp!
+        // Award offline earnings ONLY if the reconciled cloud account actually has passive upgrades and coins > 0
         if (offlineCheckedForUidRef.current !== profile.uid) {
           offlineCheckedForUidRef.current = profile.uid;
           const nowSec = Math.floor(Date.now() / 1000);
@@ -214,24 +324,17 @@ export function App() {
             nowSec,
             getActiveSeason().seasonId
           );
-          if (elapsedSeconds > 15 && coinsEarned > 0) {
-            setOfflineData((prev) =>
-              !prev || coinsEarned > prev.coins
-                ? { elapsed: elapsedSeconds, coins: coinsEarned }
-                : prev
-            );
+          if (elapsedSeconds > 15 && coinsEarned > 0 && merged.coins > 0) {
+            setOfflineData({ elapsed: elapsedSeconds, coins: coinsEarned });
+          } else {
+            setOfflineData(null);
           }
         }
 
         setState((prev) => {
           const { state: checkedPrev } = performBetaWipeIfDue(prev, Date.now());
-          const useMerged =
-            merged.prestigeCount > checkedPrev.prestigeCount ||
-            (merged.prestigeCount === checkedPrev.prestigeCount &&
-              merged.lifetimeCoins >= checkedPrev.lifetimeCoins);
-
           const next: GameState = {
-            ...(useMerged ? merged : checkedPrev),
+            ...merged,
             unlockedSkins: Array.from(
               new Set([...checkedPrev.unlockedSkins, ...merged.unlockedSkins])
             ),
@@ -246,6 +349,7 @@ export function App() {
           saveGame(next);
           return next;
         });
+        refreshMiniLeaderboard();
       } finally {
         isReconcilingCloudRef.current = false;
       }
@@ -256,7 +360,7 @@ export function App() {
   // Fast 10-second Realtime Database Leaderboard + Progress sync while actively playing
   useEffect(() => {
     const fastLeaderboardSync = () => {
-      if (isReconcilingCloudRef.current) return;
+      if (isReconcilingCloudRef.current || activeBanRecord) return;
       const curr = stateRef.current;
       if (!curr.cloudAccount) return;
       const isRecentlyActive = Date.now() - (curr.lastActiveInputTimestamp || 0) < 20000;
@@ -269,7 +373,7 @@ export function App() {
     };
 
     const deepProfileBackup = () => {
-      if (isReconcilingCloudRef.current) return;
+      if (isReconcilingCloudRef.current || activeBanRecord) return;
       const curr = stateRef.current;
       if (!curr.cloudAccount) return;
       const isRecentlyActive = Date.now() - (curr.lastActiveInputTimestamp || 0) < 45000;
@@ -302,7 +406,7 @@ export function App() {
       clearInterval(deepInterval);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, []);
+  }, [activeBanRecord]);
 
   // Keyboard Easter Egg ("rain" — ignored when typing in inputs)
   useEffect(() => {
@@ -335,7 +439,7 @@ export function App() {
   }, []);
 
   const handleClaimOffline = () => {
-    if (offlineData) {
+    if (offlineData && !activeBanRecord) {
       setState((prev) => {
         const next: GameState = {
           ...prev,
@@ -364,7 +468,7 @@ export function App() {
   });
 
   const handleEarnCoins = (amount: number, isClick: boolean, isCrit: boolean) => {
-    if (seasonInfo.isDowntime) return;
+    if (seasonInfo.isDowntime || activeBanRecord) return;
 
     let unlockedSkinsNow: { id: string; name: string }[] = [];
     let autoClaimedQuestsNow: { title: string; rewardGems: number; rewardCoins: number }[] = [];
@@ -462,8 +566,27 @@ export function App() {
     });
   };
 
+  const handleSignOutFromBanScreen = async () => {
+    await logoutPlayer();
+    setActiveBanRecord(null);
+    setState((prev) => {
+      const next: GameState = { ...prev, cloudAccount: null };
+      saveGame(next);
+      return next;
+    });
+    setShowAccountModal(true);
+  };
+
   return (
     <div className="relative w-screen h-screen bg-[#0c0f1d] text-slate-100 flex flex-col lg:flex-row overflow-hidden font-chunky noise-overlay">
+      {/* FULL-SCREEN BANNED ACCOUNT LOCK OVERLAY */}
+      {activeBanRecord && (
+        <BannedScreenModal
+          banRecord={activeBanRecord}
+          onSignOut={handleSignOutFromBanScreen}
+        />
+      )}
+
       {/* 60FPS CANVAS PARTICLES */}
       <ParticleCanvas
         reducedMotion={state.settings.reducedMotion}
@@ -475,6 +598,7 @@ export function App() {
         state={state}
         setState={setState}
         onSpawnBonus={(text) => handleNotify('BONUS EVENT!', text)}
+        forceSpawnCounter={goldenSpawnCounter}
       />
 
       {/* TOP NOTIFICATION BANNERS (Auto-Claimed Quests, Unlocks, Events) */}
@@ -511,6 +635,9 @@ export function App() {
           onOpenAccount={() => setShowAccountModal(true)}
           onOpenLeaderboard={() => setShowLeaderboardModal(true)}
           onOpenStormShop={() => setShowStormShop(true)}
+          onOpenDevTools={() => setShowDevToolsModal(true)}
+          onAutoCheatDetected={handleAutoCheatDetected}
+          top3Players={top3Players}
           onNotify={handleNotify}
           fridayBonusActive={fridayBonus}
           stormState={stormState}
@@ -545,9 +672,27 @@ export function App() {
         </div>
       </div>
 
+      {/* MARSHALLB78 EXCLUSIVE PASSWORD-PROTECTED DEV TOOLS MODAL */}
+      <DevToolsModal
+        isOpen={showDevToolsModal}
+        onClose={() => setShowDevToolsModal(false)}
+        state={state}
+        setState={setState}
+        onSpawnGoldenMatthew={() => setGoldenSpawnCounter((c) => c + 1)}
+        onTriggerRain={() => {
+          particleEngine.emitMatthewRain(
+            45,
+            stateRef.current.unlockedSkins.map((id) => getSkinById(id).image)
+          );
+          soundManager.playSkinUnlock();
+        }}
+        onNotify={handleNotify}
+        onRefreshMiniLeaderboard={refreshMiniLeaderboard}
+      />
+
       {/* WEEKEND SEASON DOWNTIME OVERLAY (Active Saturday 12:00 AM -> Monday 12:00 AM after Friday Live Event) */}
       <SeasonDowntimeModal
-        isOpen={!showIntroCutscene && seasonInfo.isDowntime}
+        isOpen={!showIntroCutscene && !activeBanRecord && seasonInfo.isDowntime}
         state={state}
         seasonNumber={seasonInfo.seasonNumber}
         downtimeRemainingSeconds={seasonInfo.downtimeRemainingSeconds}
@@ -616,7 +761,7 @@ export function App() {
       <IntroCutsceneModal isOpen={showIntroCutscene} onComplete={handleCompleteIntro} />
 
       {/* OFFLINE EARNINGS POPUP */}
-      {offlineData && (
+      {offlineData && !activeBanRecord && (
         <OfflineProgressModal
           elapsedSeconds={offlineData.elapsed}
           coinsEarned={offlineData.coins}
