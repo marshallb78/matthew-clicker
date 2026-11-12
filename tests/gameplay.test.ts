@@ -43,7 +43,6 @@ import {
 } from '../src/utils/scheduleEngine';
 import { formatTime } from '../src/utils/formatters';
 import { validateUsernameFormat } from '../src/firebase/auth';
-import { AutoClickerDetector } from '../src/utils/antiCheat';
 import { getCachedBanRecord, isDevAdminAccount } from '../src/firebase/moderation';
 import {
   MARSHALL_RECOVERY_UID,
@@ -142,25 +141,8 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
     });
   });
 
-  describe('Anti-Cheat Auto-Clicker Detector & Moderation Bans', () => {
-    it('flags >17 CPS clicking and robotic perfect-timing clicks, and enforces bans on liamkd, wessy, and dryce', () => {
-      const detector = new AutoClickerDetector();
-      let flagged = false;
-      for (let i = 0; i < 19; i++) {
-        const res = detector.recordClick(1000 + i * 50); // 19 clicks within 900ms (>17 CPS)
-        if (res.flagged) flagged = true;
-      }
-      expect(flagged).toBe(true);
-
-      // Robotic timing test (12.5 CPS with exact 80ms interval for 25 clicks)
-      const robotDetector = new AutoClickerDetector();
-      let robotFlagged = false;
-      for (let i = 0; i < 26; i++) {
-        const res = robotDetector.recordClick(5000 + i * 80);
-        if (res.flagged) robotFlagged = true;
-      }
-      expect(robotFlagged).toBe(true);
-
+  describe('Moderation Bans & Dev Admin Identity', () => {
+    it('enforces bans on liamkd, wessy, and dryce while protecting Marshallb78 admin account', () => {
       // Default banned accounts
       expect(getCachedBanRecord(null, 'liamkd')?.status).toBe('banned');
       expect(getCachedBanRecord(null, 'wessy')?.status).toBe('banned');

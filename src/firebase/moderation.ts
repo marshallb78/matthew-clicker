@@ -4,9 +4,6 @@ import { getActiveSeason } from '../utils/scheduleEngine';
 export const OFFICIAL_BAN_MESSAGE =
   'You have been banned because of suspicious behavior including cheating, using auto clickers, or hacking.';
 
-export const TEMP_AUTO_BAN_MESSAGE =
-  'You have been temporarily banned and removed from the leaderboard because of suspicious behavior including cheating, using auto clickers (>17 CPS or robotic click timing), or hacking.';
-
 export const DEV_ADMIN_USERNAME = 'marshallb78';
 export const DEV_ADMIN_UID = '89nsfff2YtaEVcNTHUBDq22V4FW2';
 
@@ -40,11 +37,6 @@ export interface ServerBroadcast {
   author: string;
 }
 
-export interface AntiCheatConfig {
-  maxCps: number;
-  detectRoboticTiming: boolean;
-}
-
 interface AdminModerationDoc {
   uid: string;
   username: string;
@@ -53,7 +45,6 @@ interface AdminModerationDoc {
   bansByUsername?: Record<string, BanRecord>;
   resetsByUid?: Record<string, ResetRecord>;
   broadcast?: ServerBroadcast | null;
-  antiCheatConfig?: AntiCheatConfig;
 }
 
 export function isDevAdminAccount(uid?: string | null, username?: string | null): boolean {
@@ -112,10 +103,6 @@ let cachedBansByUsername: Record<string, BanRecord> = {
 };
 let cachedResetsByUid: Record<string, ResetRecord> = {};
 let cachedBroadcast: ServerBroadcast | null = null;
-let cachedAntiCheatConfig: AntiCheatConfig = {
-  maxCps: 17,
-  detectRoboticTiming: true,
-};
 let lastBanFetchMs = 0;
 
 function saveLocalBanRecord(record: BanRecord): void {
@@ -206,7 +193,6 @@ export async function refreshCloudBans(force = false): Promise<{
   byUsername: Record<string, BanRecord>;
   resetsByUid: Record<string, ResetRecord>;
   broadcast: ServerBroadcast | null;
-  antiCheatConfig: AntiCheatConfig;
 }> {
   const now = Date.now();
   if (!force && now - lastBanFetchMs < 3500) {
@@ -215,14 +201,12 @@ export async function refreshCloudBans(force = false): Promise<{
       byUsername: cachedBansByUsername,
       resetsByUid: cachedResetsByUid,
       broadcast: cachedBroadcast,
-      antiCheatConfig: cachedAntiCheatConfig,
     };
   }
 
   try {
-    // Read `usernames.json` (lightweight ~3KB map with `.read: true`) which holds:
-    // - `usernames/__admin_*` (owned by Marshallb78's UID, so Marshallb78 has 100% write permission)
-    // - `usernames/__autoban_*` (owned by each flagged player's UID, so their client has 100% write permission)
+    // Read `usernames.json` (lightweight map with `.read: true`) which holds
+    // `usernames/__admin_*` (owned by Marshallb78's UID, with full admin write permission)
     const allUsernamesObj = await rtdbRestGet<Record<string, any>>('usernames', 3000);
 
     const nextByUid: Record<string, BanRecord> = { ...DEFAULT_BANNED_ACCOUNTS };
@@ -234,7 +218,6 @@ export async function refreshCloudBans(force = false): Promise<{
     const nextResets: Record<string, ResetRecord> = { ...cachedResetsByUid };
     let newestAdminDocTime = 0;
     let nextBroadcast: ServerBroadcast | null = cachedBroadcast;
-    let nextAntiCheat: AntiCheatConfig = cachedAntiCheatConfig;
 
     // 1. Preserve any in-memory records that were just written locally so polling never drops a fresh ban/unban
     for (const rec of Object.values(cachedBansByUid)) {
@@ -245,13 +228,7 @@ export async function refreshCloudBans(force = false): Promise<{
     }
 
     if (allUsernamesObj && typeof allUsernamesObj === 'object') {
-      // 2. First merge all player self-reported auto-clicker bans (`__autoban_${uid}`)
-      for (const [key, val] of Object.entries(allUsernamesObj)) {
-        if (!key.startsWith('__autoban_') || !val || typeof val !== 'object') continue;
-        mergeBanRecordIntoMaps(nextByUid, nextByUser, val as BanRecord);
-      }
-
-      // 3. Next merge legacy `__moderation_bans_*` if present
+      // 2. Merge legacy `__moderation_bans_*` if present
       if (allUsernamesObj.__moderation_bans_uid && typeof allUsernamesObj.__moderation_bans_uid === 'object') {
         for (const rec of Object.values(allUsernamesObj.__moderation_bans_uid)) {
           mergeBanRecordIntoMaps(nextByUid, nextByUser, rec as BanRecord);
@@ -263,7 +240,7 @@ export async function refreshCloudBans(force = false): Promise<{
         }
       }
 
-      // 4. Overlay Marshallb78's authoritative `__admin_*` documents
+      // 3. Overlay Marshallb78's authoritative `__admin_*` documents
       for (const [key, val] of Object.entries(allUsernamesObj)) {
         if (!key.startsWith('__admin_') || !val || typeof val !== 'object') continue;
         const adminDoc = val as AdminModerationDoc;
@@ -293,9 +270,6 @@ export async function refreshCloudBans(force = false): Promise<{
           if ('broadcast' in adminDoc) {
             nextBroadcast = adminDoc.broadcast && adminDoc.broadcast.active ? adminDoc.broadcast : null;
           }
-          if (adminDoc.antiCheatConfig) {
-            nextAntiCheat = adminDoc.antiCheatConfig;
-          }
         }
       }
     }
@@ -304,7 +278,6 @@ export async function refreshCloudBans(force = false): Promise<{
     cachedBansByUsername = nextByUser;
     cachedResetsByUid = nextResets;
     cachedBroadcast = nextBroadcast;
-    cachedAntiCheatConfig = nextAntiCheat;
     lastBanFetchMs = now;
   } catch {
     // keep cached
@@ -315,7 +288,6 @@ export async function refreshCloudBans(force = false): Promise<{
     byUsername: cachedBansByUsername,
     resetsByUid: cachedResetsByUid,
     broadcast: cachedBroadcast,
-    antiCheatConfig: cachedAntiCheatConfig,
   };
 }
 
@@ -326,10 +298,6 @@ export function getCachedResetRecord(uid?: string | null): ResetRecord | null {
 
 export function getCachedServerBroadcast(): ServerBroadcast | null {
   return cachedBroadcast;
-}
-
-export function getCachedAntiCheatConfig(): AntiCheatConfig {
-  return cachedAntiCheatConfig;
 }
 
 export function getCachedBanRecord(
@@ -379,9 +347,9 @@ export function getCachedBanRecord(
 
 /**
  * Checks whether the current account is banned or temp-banned:
- * 1. Refreshes global cloud bans (`usernames/__admin_*` and `usernames/__autoban_*`).
- * 2. Also checks the player's own `users/{uid}` document (`banStatus`) so an account that was
- *    flagged in `users/{uid}` NEVER gets un-banned after a few seconds!
+ * 1. Refreshes global cloud bans (`usernames/__admin_*`).
+ * 2. Also checks the player's own `users/{uid}` document (`banStatus`) so a banned account
+ *    stays enforced across sessions.
  * 3. If Marshallb78 pardoned the player (`status === 'pardoned'` with newer timestamp),
  *    clears the player's local ban and `users/{uid}` banStatus automatically!
  */
@@ -436,41 +404,23 @@ export async function checkAccountBanStatus(
           { banStatus: 'pardoned', banReason: null, updatedAtMs: Date.now() },
           'PATCH'
         ).catch(() => {});
-        rtdbRestWrite(
-          `usernames/__autoban_${uid}`,
-          {
-            uid,
-            username: username || userDoc.username || 'Player',
-            normalizedUsername: norm || 'player',
-            status: 'pardoned',
-            reason: 'Pardoned by Marshallb78',
-            bannedBy: 'Marshallb78',
-            bannedAtMs: newestAdminRec.bannedAtMs,
-          },
-          'PUT'
-        ).catch(() => {});
       }
       return null;
     }
 
     // Otherwise, this user's own `users/{uid}` doc says they are banned/temp_banned!
-    // Merge it into our cache and also ensure `usernames/__autoban_${uid}` is published so Marshallb78 sees it in Dev Tools!
     const userBanRec: BanRecord = {
       uid: uid!,
       username: username || userDoc.username || 'Unknown Player',
       normalizedUsername: norm || (userDoc.username || 'unknown').toLowerCase(),
       status: userDoc.banStatus as BanStatus,
       reason: userDoc.banReason || OFFICIAL_BAN_MESSAGE,
-      detectedCps: typeof userDoc.detectedCps === 'number' ? userDoc.detectedCps : 19,
-      bannedBy: userDoc.banStatus === 'temp_banned' ? 'AutoClickerDetector' : 'Marshallb78',
+      detectedCps: typeof userDoc.detectedCps === 'number' ? userDoc.detectedCps : undefined,
+      bannedBy: 'Marshallb78',
       bannedAtMs: userDocBanTime,
     };
     mergeBanRecordIntoMaps(cachedBansByUid, cachedBansByUsername, userBanRec);
     saveLocalBanRecord(userBanRec);
-
-    if (uid && !newestAdminRec) {
-      rtdbRestWrite(`usernames/__autoban_${uid}`, userBanRec, 'PUT').catch(() => {});
-    }
   } else if (newestAdminRec && newestAdminRec.status === 'pardoned') {
     clearLocalBanRecord(uid, username);
     return null;
@@ -539,46 +489,6 @@ export async function wipePlayerProgressAndLeaderboard(
 }
 
 /**
- * Triggered automatically by the Anti-Cheat detector when >17 CPS or robotic click timing is detected.
- * Temporarily bans the player, saves to localStorage + `usernames/__autoban_${uid}` + `users/${uid}`,
- * removes them from the leaderboard, and places them in Marshallb78's Dev Tools queue.
- */
-export async function triggerAutoTempBan(
-  uid: string,
-  username: string,
-  reason: string = TEMP_AUTO_BAN_MESSAGE,
-  detectedCps = 18
-): Promise<BanRecord | null> {
-  if (isDevAdminAccount(uid, username)) return null;
-
-  const now = Date.now();
-  const norm = username.trim().toLowerCase();
-  const record: BanRecord = {
-    uid: uid || `local_${norm || 'guest'}`,
-    username: username || 'Unknown Player',
-    normalizedUsername: norm || 'unknown',
-    status: 'temp_banned',
-    reason,
-    detectedCps: Math.round(detectedCps * 10) / 10,
-    bannedBy: 'AutoClickerDetector',
-    bannedAtMs: now,
-  };
-
-  mergeBanRecordIntoMaps(cachedBansByUid, cachedBansByUsername, record);
-  saveLocalBanRecord(record);
-
-  if (uid && !uid.startsWith('local_')) {
-    await Promise.all([
-      // `usernames/__autoban_${uid}` has top-level `uid === auth.uid`, so RTDB rules allow PUT 100% of the time!
-      rtdbRestWrite(`usernames/__autoban_${uid}`, record, 'PUT'),
-      wipePlayerProgressAndLeaderboard(uid, username, 'temp_banned', reason, now),
-    ]);
-  }
-
-  return record;
-}
-
-/**
  * Helper for Marshallb78 to write updates to his own admin moderation document
  * (`usernames/__admin_${adminUid}` where top-level `uid === auth.uid`, guaranteed allowed by RTDB rules!).
  */
@@ -608,7 +518,6 @@ async function updateAdminModerationDoc(
       ...(existing?.resetsByUid || {}),
     },
     broadcast: existing?.broadcast || cachedBroadcast || null,
-    antiCheatConfig: existing?.antiCheatConfig || cachedAntiCheatConfig,
   };
 
   const nextDoc = mutator(baseDoc);
@@ -804,19 +713,6 @@ export async function adminSetServerBroadcast(
   cachedBroadcast = broadcast;
   return updateAdminModerationDoc((doc) => {
     doc.broadcast = broadcast;
-    return doc;
-  });
-}
-
-/**
- * Called by Marshallb78 from Dev Tools to update the live Anti-Cheat configuration.
- */
-export async function adminUpdateAntiCheatConfig(
-  config: AntiCheatConfig
-): Promise<boolean> {
-  cachedAntiCheatConfig = config;
-  return updateAdminModerationDoc((doc) => {
-    doc.antiCheatConfig = config;
     return doc;
   });
 }

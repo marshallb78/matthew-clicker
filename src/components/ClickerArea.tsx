@@ -20,7 +20,6 @@ import { BALANCE } from '../data/balance';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
 import { EnvironmentBackground } from './EnvironmentBackground';
-import { AutoClickerDetector } from '../utils/antiCheat';
 import { ServerBroadcast, isDevAdminAccount } from '../firebase/moderation';
 import { LeaderboardEntry } from '../firebase/leaderboard';
 import {
@@ -50,7 +49,6 @@ interface ClickerAreaProps {
   onOpenLeaderboard: () => void;
   onOpenStormShop: () => void;
   onOpenDevTools?: () => void;
-  onAutoCheatDetected?: (reason: string, detectedCps: number) => void;
   top3Players?: LeaderboardEntry[];
   serverBroadcast?: ServerBroadcast | null;
   onNotify?: (title: string, subtitle: string) => void;
@@ -69,7 +67,6 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   onOpenLeaderboard,
   onOpenStormShop,
   onOpenDevTools,
-  onAutoCheatDetected,
   top3Players = [],
   serverBroadcast = null,
   fridayBonusActive,
@@ -87,9 +84,22 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
     clicks: 0,
   });
 
-  // Live CPS Counter & Anti-Cheat Detector (>17 CPS or Robotic Timing)
+  // Live CPS Counter (rolling 1-second click window)
   const [liveCps, setLiveCps] = useState<number>(0);
-  const detectorRef = useRef<AutoClickerDetector>(new AutoClickerDetector());
+  const clickTimestampsRef = useRef<number[]>([]);
+
+  const updateLiveCps = (now: number, recordClick = false): void => {
+    const timestamps = clickTimestampsRef.current;
+    if (recordClick) {
+      timestamps.push(now);
+    }
+    const cutoff = now - 1000;
+    while (timestamps.length > 0 && timestamps[0] < cutoff) {
+      timestamps.shift();
+    }
+    const cps = timestamps.length;
+    setLiveCps((prev) => (prev !== cps ? cps : prev));
+  };
 
   const characterRef = useRef<HTMLDivElement | null>(null);
   const spriteContainerRef = useRef<HTMLDivElement | null>(null);
@@ -142,8 +152,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   // 100ms ticker to keep Live CPS Counter smoothly updated even when clicks stop
   useEffect(() => {
     const ticker = setInterval(() => {
-      const current = detectorRef.current.getCurrentCps(performance.now());
-      setLiveCps((prev) => (prev !== current ? current : prev));
+      updateLiveCps(performance.now());
     }, 100);
     return () => clearInterval(ticker);
   }, []);
@@ -181,21 +190,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   };
 
   const performMatthewClick = (rawX?: number, rawY?: number) => {
-    const check = detectorRef.current.recordClick(performance.now());
-    setLiveCps(check.liveCps);
-
-    // If Auto-Clicker Detector triggers (>17 CPS or robotic timing), immediately temp-ban (unless Marshallb78)
-    if (check.flagged && !isMarshallDev) {
-      detectorRef.current.reset();
-      if (onAutoCheatDetected) {
-        onAutoCheatDetected(
-          check.reason ||
-            'You have been banned because of suspicious behavior including cheating, using auto clickers, or hacking.',
-          check.liveCps
-        );
-      }
-      return;
-    }
+    updateLiveCps(performance.now(), true);
 
     const rect = characterRef.current?.getBoundingClientRect();
     let clientX = rawX || 0;

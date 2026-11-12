@@ -31,8 +31,6 @@ import {
   ServerBroadcast,
   checkAccountBanStatus,
   getCachedServerBroadcast,
-  isDevAdminAccount,
-  triggerAutoTempBan,
 } from './firebase/moderation';
 import { useGameLoop } from './hooks/useGameLoop';
 import { ClickerArea } from './components/ClickerArea';
@@ -171,22 +169,6 @@ export function App() {
     const interval = setInterval(checkBanAndLeaderboard, 6000);
     return () => clearInterval(interval);
   }, [state.cloudAccount?.uid, state.cloudAccount?.displayUsername]);
-
-  // Auto-Clicker Detector callback (>17 CPS or Robotic Perfect-Timing Clicks)
-  const handleAutoCheatDetected = async (reason: string, detectedCps: number) => {
-    const curr = stateRef.current;
-    const uid = curr.cloudAccount?.uid || '';
-    const username =
-      curr.cloudAccount?.displayUsername || curr.cloudAccount?.username || 'Guest Player';
-
-    if (isDevAdminAccount(uid, username)) return;
-
-    const record = await triggerAutoTempBan(uid, username, reason, detectedCps);
-    if (record) {
-      applyLocalBanReset(record);
-      refreshMiniLeaderboard();
-    }
-  };
 
   // Disable right-click context menu globally so fast trackpad clicking never opens a browser menu
   useEffect(() => {
@@ -779,7 +761,6 @@ export function App() {
           onOpenLeaderboard={() => setShowLeaderboardModal(true)}
           onOpenStormShop={() => setShowStormShop(true)}
           onOpenDevTools={() => setShowDevToolsModal(true)}
-          onAutoCheatDetected={handleAutoCheatDetected}
           top3Players={top3Players}
           serverBroadcast={serverBroadcast}
           onNotify={handleNotify}

@@ -33,7 +33,7 @@ export const BannedScreenModal: React.FC<BannedScreenModalProps> = ({
 
         <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-red-500/20 border border-red-400/50 text-xs font-black uppercase tracking-widest text-red-300 mb-3">
           <ShieldAlert className="w-4 h-4 text-red-400" />
-          <span>{isTemp ? 'Anti-Cheat Temp Ban • Pending Admin Review' : 'Account Banned'}</span>
+          <span>{isTemp ? 'Temporary Ban • Pending Admin Review' : 'Account Banned'}</span>
         </div>
 
         <h1 className="text-3xl sm:text-4xl font-black text-red-400 uppercase tracking-wide drop-shadow">
@@ -46,7 +46,7 @@ export const BannedScreenModal: React.FC<BannedScreenModalProps> = ({
 
         {banRecord.reason && banRecord.reason !== OFFICIAL_BAN_MESSAGE && (
           <p className="text-xs font-bold text-amber-300 mt-3 bg-slate-950/80 border border-amber-500/30 rounded-xl p-3">
-            Detection Details: {banRecord.reason}
+            Ban Details: {banRecord.reason}
           </p>
         )}
 

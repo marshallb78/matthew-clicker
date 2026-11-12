@@ -2,16 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { GameState } from '../types/game';
 import { verifyAccountPassword } from '../firebase/auth';
 import {
-  AntiCheatConfig,
   BanRecord,
   OFFICIAL_BAN_MESSAGE,
   ServerBroadcast,
-  TEMP_AUTO_BAN_MESSAGE,
   adminBanPlayer,
   adminResetPlayerScore,
   adminSetServerBroadcast,
   adminUnbanPlayer,
-  adminUpdateAntiCheatConfig,
   isDevAdminAccount,
   refreshCloudBans,
 } from '../firebase/moderation';
@@ -37,7 +34,6 @@ import {
   Search,
   Eye,
   Clock,
-  Activity,
 } from 'lucide-react';
 
 interface DevToolsModalProps {
@@ -49,7 +45,7 @@ interface DevToolsModalProps {
   onRefreshMiniLeaderboard: () => void;
 }
 
-type DevTab = 'moderation' | 'players' | 'broadcast' | 'anticheat';
+type DevTab = 'moderation' | 'players' | 'broadcast' | 'server';
 type PlayerSortField = 'score' | 'clicks' | 'rebirths' | 'playtime' | 'recent';
 
 export const DevToolsModal: React.FC<DevToolsModalProps> = ({
@@ -86,12 +82,6 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
   const [broadcastInput, setBroadcastInput] = useState('');
   const [broadcastTheme, setBroadcastTheme] = useState<'gold' | 'red' | 'cyan' | 'purple'>('gold');
   const [activeBroadcast, setActiveBroadcast] = useState<ServerBroadcast | null>(null);
-
-  // Anti-cheat config state
-  const [antiCheatConfig, setAntiCheatConfig] = useState<AntiCheatConfig>({
-    maxCps: 17,
-    detectRoboticTiming: true,
-  });
 
   const isMarshall = isDevAdminAccount(
     state.cloudAccount?.uid,
@@ -141,7 +131,6 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
       );
       setLeaderboard(lbEntries);
       setActiveBroadcast(cloudMod.broadcast);
-      setAntiCheatConfig(cloudMod.antiCheatConfig);
     } finally {
       setLoadingData(false);
     }
@@ -300,22 +289,6 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
     }
   };
 
-  const handleSaveAntiCheatConfig = async (nextConfig: AntiCheatConfig) => {
-    setLoadingData(true);
-    try {
-      setAntiCheatConfig(nextConfig);
-      await adminUpdateAntiCheatConfig(nextConfig);
-      setStatusBanner(
-        `Updated Anti-Cheat: Max ${nextConfig.maxCps} CPS • Robotic Detection ${
-          nextConfig.detectRoboticTiming ? 'ON' : 'OFF'
-        }`
-      );
-      onNotify('ANTI-CHEAT UPDATED', `Max legal click speed set to ${nextConfig.maxCps} CPS.`);
-    } finally {
-      setLoadingData(false);
-    }
-  };
-
   const tempBannedQueue = bansList.filter((b) => b.status === 'temp_banned');
   const officialBannedList = bansList.filter((b) => b.status === 'banned');
 
@@ -353,7 +326,7 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
               </span>
             </div>
             <p className="text-xs font-bold text-slate-400">
-              Anti-Cheat Queue • Ban &amp; Unban Manager • Player Inspector • Live Server Broadcasts
+              Moderation Queue • Ban &amp; Unban Manager • Player Inspector • Live Server Broadcasts
             </p>
           </div>
         </div>
@@ -458,15 +431,15 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
                 </button>
 
                 <button
-                  onClick={() => setActiveTab('anticheat')}
+                  onClick={() => setActiveTab('server')}
                   className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-1.5 cursor-pointer transition ${
-                    activeTab === 'anticheat'
+                    activeTab === 'server'
                       ? 'bg-purple-500 text-white shadow'
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
                   <Sliders className="w-4 h-4" />
-                  <span>Anti-Cheat &amp; Server</span>
+                  <span>Server Controls</span>
                 </button>
               </div>
 
@@ -492,7 +465,7 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
               </div>
             )}
 
-            {/* ================= TAB 1: MODERATION & AUTO-CLICKER DETECTOR QUEUE ================= */}
+            {/* ================= TAB 1: MODERATION QUEUE ================= */}
             {activeTab === 'moderation' && (
               <div className="space-y-6">
                 {/* MANUAL BAN / TEMP-BAN FORM */}
@@ -539,14 +512,13 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
                   </div>
                 </form>
 
-                {/* AUTO-DETECTED TEMP-BANNED CHEATERS QUEUE */}
+                {/* TEMP-BANNED PLAYERS PENDING ADMIN REVIEW */}
                 <div className="p-5 rounded-3xl bg-amber-950/25 border-2 border-amber-400/50 space-y-3">
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <h3 className="text-sm sm:text-base font-black text-amber-300 uppercase flex items-center gap-2">
                       <ShieldAlert className="w-5 h-5 text-amber-400" />
                       <span>
-                        Auto-Detected Temp-Banned Players (&gt;{antiCheatConfig.maxCps} CPS /
-                        Robotic Timing)
+                        Temp-Banned Players (Pending Admin Review)
                       </span>
                     </h3>
                     <div className="flex items-center gap-2">
@@ -567,9 +539,8 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
 
                   {tempBannedQueue.length === 0 ? (
                     <p className="text-xs font-bold text-slate-400 py-4 text-center">
-                      No pending temp-banned players right now. Any player caught clicking above{' '}
-                      {antiCheatConfig.maxCps} CPS or using a robotic auto-clicker is locked and
-                      appears here immediately!
+                      No pending temp-banned players right now. Any player you temporarily ban
+                      from the Player Inspector appears here until you pardon or permanently ban them.
                     </p>
                   ) : (
                     <div className="space-y-2.5">
@@ -873,7 +844,7 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
                                     entry.uid,
                                     entry.username,
                                     'temp_banned',
-                                    TEMP_AUTO_BAN_MESSAGE
+                                    'Temporarily banned pending Admin review.'
                                   )
                                 }
                                 disabled={loadingData}
@@ -984,7 +955,7 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {[
                         {
-                          text: '⚠️ Auto-clickers (>17 CPS) are strictly prohibited and automatically banned!',
+                          text: '⚠️ Reminder: Respect game rules — moderators actively manage the leaderboard!',
                           theme: 'red' as const,
                         },
                         {
@@ -996,7 +967,7 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
                           theme: 'gold' as const,
                         },
                         {
-                          text: '🛠️ Fair Play Update: Leaderboard anti-cheat is active and monitoring all clicks!',
+                          text: '🎉 Have fun climbing the worldwide leaderboard in Matthew Clicker!',
                           theme: 'cyan' as const,
                         },
                       ].map((tpl) => (
@@ -1018,73 +989,9 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
               </div>
             )}
 
-            {/* ================= TAB 4: ANTI-CHEAT & SERVER CONTROLS ================= */}
-            {activeTab === 'anticheat' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div className="p-6 rounded-3xl bg-slate-900/95 border-2 border-purple-500/40 space-y-4">
-                  <h3 className="text-base font-black text-purple-300 uppercase flex items-center gap-2">
-                    <Activity className="w-5 h-5" />
-                    <span>Live Anti-Cheat Detector Settings</span>
-                  </h3>
-                  <p className="text-xs font-bold text-slate-400">
-                    Controls the real-time auto-clicker detector across all connected players.
-                  </p>
-
-                  <div className="space-y-3">
-                    <div>
-                      <span className="text-[11px] font-black uppercase text-slate-300 block mb-1.5">
-                        Max Allowed Click Speed (CPS Threshold):
-                      </span>
-                      <div className="grid grid-cols-4 gap-2">
-                        {[15, 17, 19, 22].map((cpsLimit) => (
-                          <button
-                            key={cpsLimit}
-                            onClick={() =>
-                              handleSaveAntiCheatConfig({
-                                ...antiCheatConfig,
-                                maxCps: cpsLimit,
-                              })
-                            }
-                            className={`py-2.5 rounded-xl font-black text-xs cursor-pointer transition ${
-                              antiCheatConfig.maxCps === cpsLimit
-                                ? 'bg-purple-500 text-white shadow-lg border border-purple-300'
-                                : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
-                            }`}
-                          >
-                            {cpsLimit} CPS {cpsLimit === 17 ? '(Default)' : ''}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-between">
-                      <div>
-                        <span className="text-xs font-black text-white block">
-                          Robotic / Perfect-Timing Macro Detection
-                        </span>
-                        <span className="text-[11px] text-slate-400">
-                          Flags players whose clicks have machine-like &lt;2.2ms interval variance
-                        </span>
-                      </div>
-                      <button
-                        onClick={() =>
-                          handleSaveAntiCheatConfig({
-                            ...antiCheatConfig,
-                            detectRoboticTiming: !antiCheatConfig.detectRoboticTiming,
-                          })
-                        }
-                        className={`px-4 py-2 rounded-xl font-black text-xs uppercase cursor-pointer transition ${
-                          antiCheatConfig.detectRoboticTiming
-                            ? 'bg-emerald-500 text-slate-950'
-                            : 'bg-slate-800 text-slate-400'
-                        }`}
-                      >
-                        {antiCheatConfig.detectRoboticTiming ? 'ENABLED' : 'DISABLED'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
+            {/* ================= TAB 4: SERVER CONTROLS ================= */}
+            {activeTab === 'server' && (
+              <div className="max-w-2xl">
                 <div className="p-6 rounded-3xl bg-slate-900/95 border-2 border-amber-400/40 space-y-4">
                   <h3 className="text-base font-black text-amber-300 uppercase flex items-center gap-2">
                     <Sliders className="w-5 h-5" />
