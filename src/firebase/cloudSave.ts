@@ -12,7 +12,7 @@ import { getActiveSeason } from '../utils/scheduleEngine';
 import { ALL_STORM_SKINS, equipSkin, isValidSkinId } from '../data/skins';
 import { GEM_ECONOMY_CONFIG } from '../config/gameConfig';
 import { updateLeaderboardEntry } from './leaderboard';
-import { getCachedBanRecord, refreshCloudBans } from './moderation';
+import { getCachedBanRecord, getCachedResetRecord, refreshCloudBans } from './moderation';
 
 export type CloudSyncStatus = 'idle' | 'syncing' | 'synced' | 'offline_pending' | 'error';
 
@@ -48,9 +48,11 @@ export async function loadAndReconcileCloudSave(
 
     // Check if account is banned or was recently reset in RTDB
     const banRecord = getCachedBanRecord(uid, username);
+    const resetRecord = getCachedResetRecord(uid);
     const wasExplicitlyReset =
       Boolean(rtdbUser?.resetAtMs) ||
       Boolean(rtdbLb?.isReset) ||
+      Boolean(resetRecord) ||
       Boolean(banRecord);
 
     // Only consult legacy Firestore if the user has NO Realtime Database record at all and wasn't reset/banned
@@ -227,10 +229,14 @@ export async function loadAndReconcileCloudSave(
     const localPrestige = localInActiveSeason ? localState.prestigeCount || 0 : -1;
     const localLifetimeCoins = localInActiveSeason ? localState.lifetimeCoins || 0 : -1;
 
-    // If the cloud account was explicitly reset more recently than local state, cloud wins
-    const resetAtMs = typeof rtdbUser?.resetAtMs === 'number' ? rtdbUser.resetAtMs : 0;
+    // If the cloud account was explicitly reset more recently than the user's cloud save, reset wins
+    const resetAtMs = Math.max(
+      typeof rtdbUser?.resetAtMs === 'number' ? rtdbUser.resetAtMs : 0,
+      resetRecord?.resetAtMs || 0
+    );
     const forceCloudAfterReset =
-      resetAtMs > 0 && bestCloudLifetimeCoins === 0 && bestCloudPrestige === 0;
+      resetAtMs > 0 &&
+      (bestCloudLifetimeCoins === 0 || resetAtMs >= (bestCloudLastSaveTime || 0));
 
     const useCloudBase =
       forceCloudAfterReset ||

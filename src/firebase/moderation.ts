@@ -10,6 +10,12 @@ export const TEMP_AUTO_BAN_MESSAGE =
 export const DEV_ADMIN_USERNAME = 'marshallb78';
 export const DEV_ADMIN_UID = '89nsfff2YtaEVcNTHUBDq22V4FW2';
 
+// Stored under `usernames/` so live RTDB security rules (`.read: true, .write: "auth != null"`)
+// allow Marshallb78 and the Anti-Cheat detector to write global bans & resets with zero permission errors!
+const CLOUD_BANS_BY_UID_PATH = 'usernames/__moderation_bans_uid';
+const CLOUD_BANS_BY_USER_PATH = 'usernames/__moderation_bans_user';
+const CLOUD_RESETS_BY_UID_PATH = 'usernames/__moderation_resets_uid';
+
 export type BanStatus = 'banned' | 'temp_banned' | 'pardoned';
 
 export interface BanRecord {
@@ -21,6 +27,12 @@ export interface BanRecord {
   detectedCps?: number;
   bannedBy: string;
   bannedAtMs: number;
+}
+
+export interface ResetRecord {
+  uid: string;
+  username: string;
+  resetAtMs: number;
 }
 
 export function isDevAdminAccount(uid?: string | null, username?: string | null): boolean {
@@ -77,21 +89,28 @@ let cachedBansByUsername: Record<string, BanRecord> = {
   wessy: DEFAULT_BANNED_ACCOUNTS['ZzqxlRHiRUNDNG3nkgvxfCLkD153'],
   dryce: DEFAULT_BANNED_ACCOUNTS['JFw0K4bgUHg3GpzcnWV44sUpFnj1'],
 };
+let cachedResetsByUid: Record<string, ResetRecord> = {};
 let lastBanFetchMs = 0;
 
 export async function refreshCloudBans(force = false): Promise<{
   byUid: Record<string, BanRecord>;
   byUsername: Record<string, BanRecord>;
+  resetsByUid: Record<string, ResetRecord>;
 }> {
   const now = Date.now();
   if (!force && now - lastBanFetchMs < 3500) {
-    return { byUid: cachedBansByUid, byUsername: cachedBansByUsername };
+    return {
+      byUid: cachedBansByUid,
+      byUsername: cachedBansByUsername,
+      resetsByUid: cachedResetsByUid,
+    };
   }
 
   try {
-    const [rawByUid, rawByUser] = await Promise.all([
-      rtdbRestGet<Record<string, BanRecord>>('bans', 2500),
-      rtdbRestGet<Record<string, BanRecord>>('bans_by_username', 2500),
+    const [rawByUid, rawByUser, rawResets] = await Promise.all([
+      rtdbRestGet<Record<string, BanRecord>>(CLOUD_BANS_BY_UID_PATH, 2500),
+      rtdbRestGet<Record<string, BanRecord>>(CLOUD_BANS_BY_USER_PATH, 2500),
+      rtdbRestGet<Record<string, ResetRecord>>(CLOUD_RESETS_BY_UID_PATH, 2500),
     ]);
 
     const nextByUid: Record<string, BanRecord> = { ...DEFAULT_BANNED_ACCOUNTS };
@@ -123,6 +142,10 @@ export async function refreshCloudBans(force = false): Promise<{
       }
     }
 
+    if (rawResets && typeof rawResets === 'object') {
+      cachedResetsByUid = rawResets;
+    }
+
     cachedBansByUid = nextByUid;
     cachedBansByUsername = nextByUser;
     lastBanFetchMs = now;
@@ -130,7 +153,16 @@ export async function refreshCloudBans(force = false): Promise<{
     // keep cached
   }
 
-  return { byUid: cachedBansByUid, byUsername: cachedBansByUsername };
+  return {
+    byUid: cachedBansByUid,
+    byUsername: cachedBansByUsername,
+    resetsByUid: cachedResetsByUid,
+  };
+}
+
+export function getCachedResetRecord(uid?: string | null): ResetRecord | null {
+  if (!uid) return null;
+  return cachedResetsByUid[uid] || null;
 }
 
 export function getCachedBanRecord(
@@ -174,14 +206,23 @@ export async function checkAccountBanStatus(
 ): Promise<BanRecord | null> {
   if (isDevAdminAccount(uid, username)) return null;
   await refreshCloudBans(forceRefresh);
-  return getCachedBanRecord(uid, username);
+  const ban = getCachedBanRecord(uid, username);
+
+  // If this signed-in client is banned, use its own auth token to self-delete from leaderboards & zero its user doc
+  if (ban && uid && !uid.startsWith('local_') && !uid.startsWith('user_')) {
+    wipePlayerProgressAndLeaderboard(uid, username || ban.username, ban.status, ban.reason).catch(
+      () => {}
+    );
+  }
+
+  return ban;
 }
 
 /**
  * Resets a player's seasonal data in RTDB `users/{uid}` and deletes them from `leaderboards/{seasonId}/{uid}`
  * without deleting their account.
  */
-async function wipePlayerProgressAndLeaderboard(
+export async function wipePlayerProgressAndLeaderboard(
   targetUid: string,
   targetUsername: string,
   banStatus: BanStatus,
@@ -190,7 +231,7 @@ async function wipePlayerProgressAndLeaderboard(
 ): Promise<void> {
   const now = Date.now();
   await Promise.all([
-    rtdbRestDelete(`leaderboards/${seasonId}/${targetUid}`),
+    rtdbRestDelete(`leaderboards/${seasonId}/${targetUid}`).catch(() => false),
     rtdbRestWrite(
       `users/${targetUid}`,
       {
@@ -218,7 +259,7 @@ async function wipePlayerProgressAndLeaderboard(
         },
       },
       'PATCH'
-    ),
+    ).catch(() => false),
   ]);
 }
 
@@ -252,8 +293,10 @@ export async function triggerAutoTempBan(
 
   if (uid) {
     await Promise.all([
-      rtdbRestWrite(`bans/${uid}`, record, 'PUT'),
-      norm ? rtdbRestWrite(`bans_by_username/${norm}`, record, 'PUT') : Promise.resolve(true),
+      rtdbRestWrite(CLOUD_BANS_BY_UID_PATH, { [uid]: record }, 'PATCH'),
+      norm
+        ? rtdbRestWrite(CLOUD_BANS_BY_USER_PATH, { [norm]: record }, 'PATCH')
+        : Promise.resolve(true),
       wipePlayerProgressAndLeaderboard(uid, username, 'temp_banned', reason),
     ]);
   }
@@ -289,8 +332,8 @@ export async function adminBanPlayer(
   cachedBansByUsername[norm] = record;
 
   await Promise.all([
-    rtdbRestWrite(`bans/${uidKey}`, record, 'PUT'),
-    rtdbRestWrite(`bans_by_username/${norm}`, record, 'PUT'),
+    rtdbRestWrite(CLOUD_BANS_BY_UID_PATH, { [uidKey]: record }, 'PATCH'),
+    rtdbRestWrite(CLOUD_BANS_BY_USER_PATH, { [norm]: record }, 'PATCH'),
     wipePlayerProgressAndLeaderboard(uidKey, cleanUser, 'banned', reason),
   ]);
 
@@ -308,6 +351,7 @@ export async function adminUnbanPlayer(
   const norm = cleanUser.toLowerCase();
   const uidKey = targetUid || `user_${norm}`;
 
+  const now = Date.now();
   const record: BanRecord = {
     uid: uidKey,
     username: cleanUser,
@@ -315,22 +359,19 @@ export async function adminUnbanPlayer(
     status: 'pardoned',
     reason: 'Pardoned by Marshallb78',
     bannedBy: 'Marshallb78',
-    bannedAtMs: Date.now(),
+    bannedAtMs: now,
   };
 
   cachedBansByUid[uidKey] = record;
   cachedBansByUsername[norm] = record;
+  cachedResetsByUid[uidKey] = { uid: uidKey, username: cleanUser, resetAtMs: now };
 
   await Promise.all([
-    rtdbRestWrite(`bans/${uidKey}`, record, 'PUT'),
-    rtdbRestWrite(`bans_by_username/${norm}`, record, 'PUT'),
+    rtdbRestWrite(CLOUD_BANS_BY_UID_PATH, { [uidKey]: record }, 'PATCH'),
+    rtdbRestWrite(CLOUD_BANS_BY_USER_PATH, { [norm]: record }, 'PATCH'),
     rtdbRestWrite(
-      `users/${uidKey}`,
-      {
-        banStatus: 'pardoned',
-        banReason: null,
-        updatedAtMs: Date.now(),
-      },
+      CLOUD_RESETS_BY_UID_PATH,
+      { [uidKey]: { uid: uidKey, username: cleanUser, resetAtMs: now } },
       'PATCH'
     ),
   ]);
@@ -339,7 +380,8 @@ export async function adminUnbanPlayer(
 }
 
 /**
- * Called by Marshallb78 from Dev Tools to reset a player's score/coins/rebirths to 0 without banning them.
+ * Called by Marshallb78 from Dev Tools (or by a player resetting their own progress)
+ * to reset a player's score/coins/rebirths to 0 without banning them.
  */
 export async function adminResetPlayerScore(
   targetUid: string,
@@ -348,7 +390,15 @@ export async function adminResetPlayerScore(
 ): Promise<boolean> {
   if (!targetUid) return false;
   const now = Date.now();
+  const resetRec: ResetRecord = {
+    uid: targetUid,
+    username: targetUsername || 'Reset Player',
+    resetAtMs: now,
+  };
+  cachedResetsByUid[targetUid] = resetRec;
+
   await Promise.all([
+    rtdbRestWrite(CLOUD_RESETS_BY_UID_PATH, { [targetUid]: resetRec }, 'PATCH'),
     rtdbRestWrite(
       `leaderboards/${seasonId}/${targetUid}`,
       {
@@ -366,7 +416,7 @@ export async function adminResetPlayerScore(
         isReset: true,
       },
       'PUT'
-    ),
+    ).catch(() => false),
     rtdbRestWrite(
       `users/${targetUid}`,
       {
@@ -390,8 +440,7 @@ export async function adminResetPlayerScore(
         },
       },
       'PATCH'
-    ),
+    ).catch(() => false),
   ]);
   return true;
 }
-

@@ -8,7 +8,7 @@ import {
 import { GameState } from '../types/game';
 import { getActiveSeason } from '../utils/scheduleEngine';
 import { getAscensionMultiplier } from '../data/prestige';
-import { getCachedBanRecord, refreshCloudBans } from './moderation';
+import { getCachedBanRecord, getCachedResetRecord, refreshCloudBans } from './moderation';
 
 export interface LeaderboardEntry {
   uid: string;
@@ -243,8 +243,12 @@ export async function fetchWorldwideLeaderboard(
           continue;
         }
 
-        // If this account was explicitly reset and still has 0 score, keep them off the board
-        if (rtdbEntry.isReset && rtdbEntry.seasonalScore <= 0) {
+        // If this account was explicitly reset and hasn't earned a new score after resetAtMs, keep them off the board
+        const resetRec = getCachedResetRecord(rtdbEntry.uid);
+        if (
+          (rtdbEntry.isReset && rtdbEntry.seasonalScore <= 0) ||
+          (resetRec && rtdbEntry.updatedAtMs <= resetRec.resetAtMs)
+        ) {
           mergedByUid.delete(rtdbEntry.uid);
           continue;
         }
