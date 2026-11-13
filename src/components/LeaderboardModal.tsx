@@ -5,6 +5,7 @@ import {
   fetchPlayerLeaderboardEntry,
   updateLeaderboardEntry,
   sortLeaderboardDeterministically,
+  isExcludedFromLeaderboard,
   LeaderboardEntry,
 } from '../firebase/leaderboard';
 import { getAscensionMultiplier } from '../data/prestige';
@@ -53,7 +54,10 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
 
       const list = await fetchWorldwideLeaderboard(seasonId, 50);
 
-      if (state.cloudAccount) {
+      if (
+        state.cloudAccount &&
+        !isExcludedFromLeaderboard(state.cloudAccount.uid, state.cloudAccount.displayUsername)
+      ) {
         const localScore = Math.max(
           0,
           Math.floor(Math.max(state.seasonalScore || 0, state.lifetimeCoins || 0))
@@ -93,6 +97,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
         );
       } else {
         setEntries(list);
+        setPlayerEntry(null);
       }
     } finally {
       setLoading(false);

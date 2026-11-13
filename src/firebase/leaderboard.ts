@@ -34,6 +34,28 @@ export interface LeaderboardEntry {
   isReset?: boolean;
 }
 
+/**
+ * Accounts excluded from appearing on or publishing to public leaderboards
+ * WITHOUT banning or restricting their gameplay/cloud saves.
+ */
+export const LEADERBOARD_EXCLUDED_UIDS = new Set<string>([
+  '0eFt9SNVpPSxm9SGPcD6n9W5u3E3', // GABBYDADDY69
+]);
+
+export const LEADERBOARD_EXCLUDED_USERNAMES = new Set<string>([
+  'gabbydaddy69',
+]);
+
+export function isExcludedFromLeaderboard(
+  uid?: string | null,
+  username?: string | null
+): boolean {
+  if (uid && LEADERBOARD_EXCLUDED_UIDS.has(uid.trim())) return true;
+  const norm = (username || '').trim().toLowerCase();
+  if (norm && LEADERBOARD_EXCLUDED_USERNAMES.has(norm)) return true;
+  return false;
+}
+
 const lastPublishedSnapshotByUid = new Map<
   string,
   {
@@ -151,7 +173,14 @@ export function updateLeaderboardEntryKeepalive(
   state: GameState,
   seasonId: string = getActiveSeason().seasonId
 ): void {
-  if (!uid || !username || getCachedBanRecord(uid, username)) return;
+  if (
+    !uid ||
+    !username ||
+    getCachedBanRecord(uid, username) ||
+    isExcludedFromLeaderboard(uid, username)
+  ) {
+    return;
+  }
   const payload = buildLeaderboardPayload(uid, username, state, Date.now());
   rtdbRestWriteKeepalive(`leaderboards/${seasonId}/${uid}`, payload, 'PUT');
 }
@@ -169,9 +198,9 @@ export async function updateLeaderboardEntry(
 ): Promise<boolean> {
   if (!uid || !username) return false;
 
-  // Never allow banned or temp-banned accounts onto the leaderboard
+  // Never allow banned, temp-banned, or leaderboard-excluded accounts onto the leaderboard
   const ban = getCachedBanRecord(uid, username);
-  if (ban) {
+  if (ban || isExcludedFromLeaderboard(uid, username)) {
     rtdbRestDelete(`leaderboards/${seasonId}/${uid}`).catch(() => {});
     return false;
   }
@@ -249,7 +278,12 @@ export async function fetchWorldwideLeaderboard(
     if (legacyMap) {
       for (const [uid, entry] of legacyMap.entries()) {
         if (rtdbObj && uid in rtdbObj) continue;
-        if (getCachedBanRecord(entry.uid, entry.username)) continue;
+        if (
+          getCachedBanRecord(entry.uid, entry.username) ||
+          isExcludedFromLeaderboard(entry.uid, entry.username)
+        ) {
+          continue;
+        }
         mergedByUid.set(uid, entry);
       }
     }
@@ -260,8 +294,11 @@ export async function fetchWorldwideLeaderboard(
         if (!raw || typeof raw !== 'object') continue;
         const rtdbEntry = parseRawEntry(uid, raw);
 
-        // If this player is banned or temp-banned, purge from RTDB and skip
-        if (getCachedBanRecord(rtdbEntry.uid, rtdbEntry.username)) {
+        // If this player is banned, temp-banned, or leaderboard-excluded, purge from RTDB and skip
+        if (
+          getCachedBanRecord(rtdbEntry.uid, rtdbEntry.username) ||
+          isExcludedFromLeaderboard(rtdbEntry.uid, rtdbEntry.username)
+        ) {
           rtdbRestDelete(`leaderboards/${seasonId}/${uid}`).catch(() => {});
           mergedByUid.delete(rtdbEntry.uid);
           continue;
@@ -281,9 +318,11 @@ export async function fetchWorldwideLeaderboard(
       }
     }
 
-    // 3. Final filter against banned usernames/UIDs (in case multiple UIDs share a banned username)
+    // 3. Final filter against banned or excluded usernames/UIDs
     const cleanEntries = Array.from(mergedByUid.values()).filter(
-      (entry) => !getCachedBanRecord(entry.uid, entry.username)
+      (entry) =>
+        !getCachedBanRecord(entry.uid, entry.username) &&
+        !isExcludedFromLeaderboard(entry.uid, entry.username)
     );
 
     return sortLeaderboardDeterministically(cleanEntries).slice(0, maxEntries);
@@ -312,7 +351,7 @@ export async function fetchPlayerLeaderboardEntry(
   uid: string,
   seasonId: string = getActiveSeason().seasonId
 ): Promise<LeaderboardEntry | null> {
-  if (!uid) return null;
+  if (!uid || isExcludedFromLeaderboard(uid)) return null;
 
   try {
     const rtdbRaw = await rtdbRestGet<Record<string, any>>(
@@ -321,7 +360,12 @@ export async function fetchPlayerLeaderboardEntry(
     );
     if (rtdbRaw && typeof rtdbRaw === 'object') {
       const parsed = parseRawEntry(uid, rtdbRaw);
-      if (getCachedBanRecord(parsed.uid, parsed.username)) return null;
+      if (
+        getCachedBanRecord(parsed.uid, parsed.username) ||
+        isExcludedFromLeaderboard(parsed.uid, parsed.username)
+      ) {
+        return null;
+      }
       if (parsed.isReset && parsed.seasonalScore <= 0) return null;
       return parsed;
     }
@@ -329,14 +373,25 @@ export async function fetchPlayerLeaderboardEntry(
     const legacyMap = legacyFirestoreMapBySeason.get(seasonId);
     if (legacyMap?.has(uid)) {
       const entry = legacyMap.get(uid) || null;
-      if (entry && getCachedBanRecord(entry.uid, entry.username)) return null;
+      if (
+        entry &&
+        (getCachedBanRecord(entry.uid, entry.username) ||
+          isExcludedFromLeaderboard(entry.uid, entry.username))
+      ) {
+        return null;
+      }
       return entry;
     }
 
     const snap = await firestoreRestGetDoc(`leaderboards/${seasonId}/entries/${uid}`, false, 3000);
     if (!snap.exists) return null;
     const entry = parseRawEntry(uid, snap.data);
-    if (getCachedBanRecord(entry.uid, entry.username)) return null;
+    if (
+      getCachedBanRecord(entry.uid, entry.username) ||
+      isExcludedFromLeaderboard(entry.uid, entry.username)
+    ) {
+      return null;
+    }
     return entry;
   } catch {
     return null;

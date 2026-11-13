@@ -12,6 +12,7 @@ import {
   rtdbRestWrite,
   firestoreRestGetDoc,
 } from './config';
+import { isExcludedFromLeaderboard } from './leaderboard';
 
 export interface PlayerAccount {
   uid: string;
@@ -426,15 +427,17 @@ export async function changeAccountUsername(
       },
       'PATCH'
     ),
-    rtdbRestWrite(
-      `leaderboards/${seasonId}/${uid}`,
-      {
-        uid,
-        username: cleanNew,
-        updatedAtMs: Date.now(),
-      },
-      'PATCH'
-    ),
+    isExcludedFromLeaderboard(uid, oldUsername) || isExcludedFromLeaderboard(uid, cleanNew)
+      ? Promise.resolve(true)
+      : rtdbRestWrite(
+          `leaderboards/${seasonId}/${uid}`,
+          {
+            uid,
+            username: cleanNew,
+            updatedAtMs: Date.now(),
+          },
+          'PATCH'
+        ),
   ]);
 
   return cleanNew;

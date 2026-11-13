@@ -44,6 +44,7 @@ import {
 import { formatTime } from '../src/utils/formatters';
 import { validateUsernameFormat } from '../src/firebase/auth';
 import { getCachedBanRecord, isDevAdminAccount } from '../src/firebase/moderation';
+import { isExcludedFromLeaderboard } from '../src/firebase/leaderboard';
 import {
   MARSHALL_RECOVERY_UID,
   MARSHALL_RECOVERED_SCORE,
@@ -483,6 +484,16 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
       });
       expect(afterRebirth.recoveredFromCareerLoss).toBe(false);
       expect(afterRebirth.state.coins).toBe(0);
+    });
+  });
+
+  describe('Leaderboard Exclusions (Unbanned High-Score Play)', () => {
+    it('excludes GABBYDADDY69 by UID and username without banning the account', () => {
+      expect(isExcludedFromLeaderboard('0eFt9SNVpPSxm9SGPcD6n9W5u3E3', 'GABBYDADDY69')).toBe(true);
+      expect(isExcludedFromLeaderboard('0eFt9SNVpPSxm9SGPcD6n9W5u3E3', null)).toBe(true);
+      expect(isExcludedFromLeaderboard('some-other-uid', 'gabbydaddy69')).toBe(true);
+      expect(isExcludedFromLeaderboard('some-other-uid', 'RegularPlayer')).toBe(false);
+      expect(getCachedBanRecord('0eFt9SNVpPSxm9SGPcD6n9W5u3E3', 'GABBYDADDY69')).toBeNull();
     });
   });
 });
